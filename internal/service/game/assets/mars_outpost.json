@@ -1,0 +1,78 @@
+{
+  "id": "mars_outpost_min",
+  "name": "火星前哨站 · 原型",
+  "grid": {
+    "cols": 200,
+    "rows": 200,
+    "tileSize": 1
+  },
+  "dimensions": {
+    "width": 200,
+    "height": 200
+  },
+  "buildings": [
+    {
+      "id": "central_dome",
+      "label": "联合指挥穹顶",
+      "rect": [10, 6, 8, 6],
+      "energy": {
+        "type": "consumer",
+        "rate": 160
+      }
+    },
+    {
+      "id": "bio_lab",
+      "label": "生物温室",
+      "rect": [4, 14, 6, 4],
+      "energy": {
+        "type": "consumer",
+        "rate": 120
+      }
+    },
+    {
+      "id": "hab_south",
+      "label": "居住区",
+      "rect": [20, 15, 8, 5],
+      "energy": {
+        "type": "consumer",
+        "rate": 100
+      }
+    },
+    {
+      "id": "rover_bay",
+      "label": "外勤车库",
+      "rect": [24, 7, 6, 4],
+      "energy": {
+        "type": "consumer",
+        "rate": 110
+      }
+    },
+    {
+      "id": "power_station",
+      "label": "能源塔阵列",
+      "rect": [32, 10, 7, 5],
+      "energy": {
+        "type": "storage",
+        "capacity": 420,
+        "current": 160,
+        "output": 120
+      }
+    }
+  ],
+  "agents": [
+    {
+      "id": "ares-01",
+      "label": "阿瑞斯-01 指挥体",
+      "position": [18, 14],
+      "color": 11541703,
+      "behaviors": ["move_left", "move_right", "move_up", "move_down"]
+    },
+    {
+      "id": "support-02",
+      "label": "支援单位-02",
+      "position": [22, 14],
+      "color": 11576490,
+      "behaviors": ["move_left", "move_right", "move_up", "move_down"]
+    }
+  ]
+}

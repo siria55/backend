@@ -41,6 +41,10 @@ func New(cfg config.Config, agentSvc *agent.Service, gameSvc *game.Service) *Ser
 		v1.GET("/game/state", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gameSvc.Snapshot())
 		})
+
+		v1.GET("/game/scene", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gameSvc.Scene())
+		})
 	}
 
 	return &Server{cfg: cfg, engine: engine}

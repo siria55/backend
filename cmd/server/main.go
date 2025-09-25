@@ -13,7 +13,10 @@ func main() {
 	cfg := config.Load()
 
 	agentSvc := agentservice.New()
-	gameSvc := gameservice.New()
+	gameSvc, err := gameservice.New()
+	if err != nil {
+		log.Fatalf("load scene failed: %v", err)
+	}
 
 	srv := server.New(cfg, agentSvc, gameSvc)
 
