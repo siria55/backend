@@ -23,6 +23,38 @@ const specJSON = `{
         }
       }
     },
+    "/game/scene/buildings/{buildingID}/energy": {
+      "post": {
+        "tags": ["Game"],
+        "summary": "更新指定建筑的当前能量值",
+        "consumes": ["application/json"],
+        "produces": ["application/json"],
+        "parameters": [
+          {
+            "name": "buildingID",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {"$ref": "#/definitions/server.BuildingEnergyUpdateRequest"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "更新后的建筑数据",
+            "schema": {"$ref": "#/definitions/game.SceneBuilding"}
+          },
+          "400": {
+            "description": "请求参数错误",
+            "schema": {"$ref": "#/definitions/server.ErrorResponse"}
+          }
+        }
+      }
+    },
     "/system/scene": {
       "get": {
         "tags": ["System"],
@@ -547,6 +579,13 @@ const specJSON = `{
       "properties": {
         "error": {"type": "string"}
       }
+    },
+    "server.BuildingEnergyUpdateRequest": {
+      "type": "object",
+      "properties": {
+        "current": {"type": "number"}
+      },
+      "required": ["current"]
     }
   }
 }`

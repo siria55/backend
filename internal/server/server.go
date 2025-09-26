@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -64,7 +65,12 @@ func (s *Server) registerRoutes() {
 
 	v1 := s.engine.Group("/v1")
 	{
-		v1.GET("/game/scene", s.getGameScene)
+		gameRoutes := v1.Group("/game")
+		{
+			gameRoutes.GET("/scene", s.getGameScene)
+			gameRoutes.POST("/scene/buildings/:buildingID/energy", s.updateGameBuildingEnergy)
+			gameRoutes.POST("/scene/energy/tick", s.advanceGameEnergy)
+		}
 
 		system := v1.Group("/system")
 		{
@@ -140,6 +146,50 @@ func (s *Server) updateSystemScene(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, snapshot)
+}
+
+func (s *Server) updateGameBuildingEnergy(c *gin.Context) {
+	buildingID := c.Param("buildingID")
+	if strings.TrimSpace(buildingID) == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "buildingID is required"})
+		return
+	}
+
+	var req BuildingEnergyUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	building, err := s.gameSvc.UpdateBuildingEnergyCurrent(c.Request.Context(), buildingID, req.Current)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, building)
+}
+
+func (s *Server) advanceGameEnergy(c *gin.Context) {
+	var req EnergyTickRequest
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+	if req.Seconds <= 0 {
+		req.Seconds = 1
+	}
+	if req.DrainFactor <= 0 {
+		req.DrainFactor = game.DefaultDrainFactor
+	}
+
+	scene, err := s.gameSvc.AdvanceEnergyState(c.Request.Context(), req.Seconds, req.DrainFactor)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, scene)
 }
 
 func (s *Server) updateSystemBuildingTemplate(c *gin.Context) {
@@ -461,6 +511,15 @@ type StatusResponse struct {
 // ErrorResponse 表示通用错误响应。
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+type BuildingEnergyUpdateRequest struct {
+	Current float64 `json:"current" binding:"required"`
+}
+
+type EnergyTickRequest struct {
+	Seconds     float64 `json:"seconds"`
+	DrainFactor float64 `json:"drainFactor"`
 }
 
 const swaggerUIHTML = `<!DOCTYPE html>

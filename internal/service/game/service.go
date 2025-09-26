@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -13,6 +14,8 @@ type Service struct {
 	db    *sql.DB
 	scene Scene
 }
+
+const DefaultDrainFactor = 0.002
 
 // New 返回默认的 Game 服务实例，并加载初始场景配置。
 func New(db *sql.DB, sceneID string) (*Service, error) {
@@ -346,4 +349,116 @@ func (s *Service) reloadScene() error {
 	}
 	s.scene = updated
 	return nil
+}
+
+// UpdateBuildingEnergyCurrent 更新指定建筑的当前能量值，并返回更新后的建筑信息。
+func (s *Service) UpdateBuildingEnergyCurrent(ctx context.Context, buildingID string, currentValue float64) (SceneBuilding, error) {
+	buildingID = strings.TrimSpace(buildingID)
+	if buildingID == "" {
+		return SceneBuilding{}, fmt.Errorf("%w: building id required", ErrInvalidSceneEntity)
+	}
+
+	currentInt := int(math.Round(currentValue))
+	if currentInt < 0 {
+		currentInt = 0
+	}
+
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE system_scene_buildings
+		   SET energy_current = $1
+		 WHERE id = $2
+	`, currentInt, buildingID)
+	if err != nil {
+		return SceneBuilding{}, err
+	}
+	if rows, errRows := res.RowsAffected(); errRows == nil && rows == 0 {
+		return SceneBuilding{}, fmt.Errorf("%w: building %s not found", ErrInvalidSceneEntity, buildingID)
+	}
+
+	if err := s.reloadScene(); err != nil {
+		return SceneBuilding{}, err
+	}
+
+	for _, building := range s.scene.Buildings {
+		if building.ID == buildingID {
+			if building.Energy != nil && building.Energy.Type == "storage" {
+				building.Energy.Current = currentInt
+			}
+			return building, nil
+		}
+	}
+
+	return SceneBuilding{}, fmt.Errorf("%w: building %s not found after update", ErrInvalidSceneEntity, buildingID)
+}
+
+// AdvanceEnergyState 根据耗能计算更新储能节点的剩余能量。
+func (s *Service) AdvanceEnergyState(ctx context.Context, seconds float64, drainFactor float64) (Scene, error) {
+	if seconds <= 0 {
+		seconds = 1
+	}
+	if drainFactor <= 0 {
+		drainFactor = DefaultDrainFactor
+	}
+
+	var totalConsumption float64
+	var totalOutput float64
+	storageBuildings := make([]SceneBuilding, 0)
+
+	for _, building := range s.scene.Buildings {
+		if building.Energy == nil {
+			continue
+		}
+		switch building.Energy.Type {
+		case "consumer":
+			totalConsumption += float64(building.Energy.Rate)
+		case "storage":
+			totalOutput += float64(building.Energy.Output)
+			storageBuildings = append(storageBuildings, building)
+		}
+	}
+
+	if len(storageBuildings) == 0 {
+		return s.scene, nil
+	}
+
+	netLoad := totalConsumption - totalOutput
+	if netLoad <= 0 {
+		return s.scene, nil
+	}
+
+	drain := netLoad * drainFactor * seconds
+	if drain <= 0 {
+		return s.scene, nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Scene{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	for _, building := range storageBuildings {
+		current := float64(building.Energy.Current)
+		updated := int(math.Max(math.Round(current-drain), 0))
+		if updated == building.Energy.Current {
+			continue
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE system_scene_buildings SET energy_current = $1 WHERE id = $2`, updated, building.ID); err != nil {
+			return Scene{}, err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return Scene{}, err
+	}
+
+	if err := s.reloadScene(); err != nil {
+		return Scene{}, err
+	}
+
+	return s.scene, nil
 }
