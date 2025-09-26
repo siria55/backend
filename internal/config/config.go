@@ -6,12 +6,17 @@ import "os"
 type Config struct {
 	Environment string
 	HTTP        HTTPConfig
+	Database    DatabaseConfig
 }
 
 // HTTPConfig 控制 HTTP 服务监听地址。
 type HTTPConfig struct {
 	Host string
 	Port string
+}
+
+type DatabaseConfig struct {
+	URL string
 }
 
 // Load 从环境变量中加载配置，并在缺省时使用安全默认值。
@@ -21,6 +26,9 @@ func Load() Config {
 		HTTP: HTTPConfig{
 			Host: envOrDefault("HTTP_HOST", "0.0.0.0"),
 			Port: envOrDefault("HTTP_PORT", "8080"),
+		},
+		Database: DatabaseConfig{
+			URL: envOrDefault("DATABASE_URL", "postgres://postgres:z13547842355@localhost:5432/mars?sslmode=disable"),
 		},
 	}
 }

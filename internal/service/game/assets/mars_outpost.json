@@ -2,13 +2,13 @@
   "id": "mars_outpost_min",
   "name": "火星前哨站 · 原型",
   "grid": {
-    "cols": 200,
-    "rows": 200,
+    "cols": 100,
+    "rows": 100,
     "tileSize": 1
   },
   "dimensions": {
-    "width": 200,
-    "height": 200
+    "width": 100,
+    "height": 100
   },
   "buildings": [
     {
