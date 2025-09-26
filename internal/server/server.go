@@ -70,6 +70,10 @@ func (s *Server) registerRoutes() {
 		{
 			system.GET("/scene", s.getSystemScene)
 			system.PUT("/scene", s.updateSystemScene)
+			system.PUT("/templates/buildings/:id", s.updateSystemBuildingTemplate)
+			system.PUT("/templates/agents/:id", s.updateSystemAgentTemplate)
+			system.PUT("/scene/buildings/:id", s.updateSystemSceneBuilding)
+			system.PUT("/scene/agents/:id", s.updateSystemSceneAgent)
 		}
 
 		agents := v1.Group("/agents")
@@ -132,6 +136,163 @@ func (s *Server) updateSystemScene(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, snapshot)
+}
+
+func (s *Server) updateSystemBuildingTemplate(c *gin.Context) {
+	id := c.Param("id")
+	if strings.TrimSpace(id) == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id is required"})
+		return
+	}
+
+	var req TemplateBuildingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	input := game.UpdateBuildingTemplateInput{
+		ID:     id,
+		Label:  req.Label,
+		Energy: energyRequestToInput(req.Energy),
+	}
+
+	snapshot, err := s.gameSvc.UpdateBuildingTemplate(c.Request.Context(), input)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, game.ErrInvalidTemplate) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, snapshot)
+}
+
+func (s *Server) updateSystemAgentTemplate(c *gin.Context) {
+	id := c.Param("id")
+	if strings.TrimSpace(id) == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id is required"})
+		return
+	}
+
+	var req TemplateAgentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	var position *[2]int
+	if len(req.DefaultPosition) == 2 {
+		coords := [2]int{req.DefaultPosition[0], req.DefaultPosition[1]}
+		position = &coords
+	}
+
+	input := game.UpdateAgentTemplateInput{
+		ID:       id,
+		Label:    req.Label,
+		Color:    req.Color,
+		Position: position,
+	}
+
+	snapshot, err := s.gameSvc.UpdateAgentTemplate(c.Request.Context(), input)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, game.ErrInvalidTemplate) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, snapshot)
+}
+
+func (s *Server) updateSystemSceneBuilding(c *gin.Context) {
+	id := c.Param("id")
+	if strings.TrimSpace(id) == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id is required"})
+		return
+	}
+
+	var req SceneBuildingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	if len(req.Rect) != 4 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "rect must contain [x, y, width, height]"})
+		return
+	}
+
+	rect := [4]int{req.Rect[0], req.Rect[1], req.Rect[2], req.Rect[3]}
+
+	input := game.UpdateSceneBuildingInput{
+		ID:         id,
+		Label:      req.Label,
+		TemplateID: normalizeStringPointer(req.TemplateID),
+		Rect:       rect,
+		Energy:     energyRequestToInput(req.Energy),
+	}
+
+	snapshot, err := s.gameSvc.UpdateSceneBuilding(c.Request.Context(), input)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, game.ErrInvalidSceneEntity) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, snapshot)
+}
+
+func (s *Server) updateSystemSceneAgent(c *gin.Context) {
+	id := c.Param("id")
+	if strings.TrimSpace(id) == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id is required"})
+		return
+	}
+
+	var req SceneAgentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	if len(req.Position) != 2 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "position must contain [x, y]"})
+		return
+	}
+
+	position := [2]int{req.Position[0], req.Position[1]}
+
+	input := game.UpdateSceneAgentInput{
+		ID:         id,
+		Label:      req.Label,
+		TemplateID: normalizeStringPointer(req.TemplateID),
+		Position:   position,
+		Color:      req.Color,
+		Actions:    req.Actions,
+	}
+
+	snapshot, err := s.gameSvc.UpdateSceneAgent(c.Request.Context(), input)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, game.ErrInvalidSceneEntity) {
+			status = http.StatusBadRequest
+		}
+		if errors.Is(err, game.ErrInvalidTemplate) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, ErrorResponse{Error: err.Error()})
 		return
 	}
 
@@ -258,6 +419,40 @@ type SystemSceneUpdateBounds struct {
 	Height int `json:"height"`
 }
 
+type TemplateEnergyRequest struct {
+	Type     *string `json:"type"`
+	Capacity *int    `json:"capacity"`
+	Current  *int    `json:"current"`
+	Output   *int    `json:"output"`
+	Rate     *int    `json:"rate"`
+}
+
+type TemplateBuildingRequest struct {
+	Label  string                 `json:"label"`
+	Energy *TemplateEnergyRequest `json:"energy"`
+}
+
+type TemplateAgentRequest struct {
+	Label           string `json:"label"`
+	Color           *int   `json:"color"`
+	DefaultPosition []int  `json:"defaultPosition"`
+}
+
+type SceneBuildingRequest struct {
+	Label      string                 `json:"label"`
+	TemplateID *string                `json:"templateId"`
+	Rect       []int                  `json:"rect"`
+	Energy     *TemplateEnergyRequest `json:"energy"`
+}
+
+type SceneAgentRequest struct {
+	Label      string   `json:"label"`
+	TemplateID *string  `json:"templateId"`
+	Position   []int    `json:"position"`
+	Color      *int     `json:"color"`
+	Actions    []string `json:"actions"`
+}
+
 // StatusResponse 表示通用状态响应。
 type StatusResponse struct {
 	Status string `json:"status"`
@@ -295,3 +490,28 @@ const swaggerUIHTML = `<!DOCTYPE html>
     </script>
   </body>
 </html>`
+
+func energyRequestToInput(payload *TemplateEnergyRequest) *game.UpdateTemplateEnergyInput {
+	if payload == nil {
+		return nil
+	}
+	return &game.UpdateTemplateEnergyInput{
+		Type:     normalizeStringPointer(payload.Type),
+		Capacity: payload.Capacity,
+		Current:  payload.Current,
+		Output:   payload.Output,
+		Rate:     payload.Rate,
+	}
+}
+
+func normalizeStringPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	result := trimmed
+	return &result
+}

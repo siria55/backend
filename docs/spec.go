@@ -60,6 +60,134 @@ const specJSON = `{
         }
       }
     },
+    "/system/templates/buildings/{id}": {
+      "put": {
+        "tags": ["System"],
+        "summary": "更新系统建筑模板",
+        "consumes": ["application/json"],
+        "produces": ["application/json"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {"$ref": "#/definitions/server.TemplateBuildingRequest"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "更新后的快照",
+            "schema": {"$ref": "#/definitions/game.Snapshot"}
+          },
+          "400": {
+            "description": "请求参数错误",
+            "schema": {"$ref": "#/definitions/server.ErrorResponse"}
+          }
+        }
+      }
+    },
+    "/system/templates/agents/{id}": {
+      "put": {
+        "tags": ["System"],
+        "summary": "更新系统 Agent 模板",
+        "consumes": ["application/json"],
+        "produces": ["application/json"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {"$ref": "#/definitions/server.TemplateAgentRequest"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "更新后的快照",
+            "schema": {"$ref": "#/definitions/game.Snapshot"}
+          },
+          "400": {
+            "description": "请求参数错误",
+            "schema": {"$ref": "#/definitions/server.ErrorResponse"}
+          }
+        }
+      }
+    },
+    "/system/scene/buildings/{id}": {
+      "put": {
+        "tags": ["System"],
+        "summary": "更新场景建筑实例",
+        "consumes": ["application/json"],
+        "produces": ["application/json"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {"$ref": "#/definitions/server.SceneBuildingRequest"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "更新后的快照",
+            "schema": {"$ref": "#/definitions/game.Snapshot"}
+          },
+          "400": {
+            "description": "请求参数错误",
+            "schema": {"$ref": "#/definitions/server.ErrorResponse"}
+          }
+        }
+      }
+    },
+    "/system/scene/agents/{id}": {
+      "put": {
+        "tags": ["System"],
+        "summary": "更新场景 Agent 实例",
+        "consumes": ["application/json"],
+        "produces": ["application/json"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "payload",
+            "in": "body",
+            "required": true,
+            "schema": {"$ref": "#/definitions/server.SceneAgentRequest"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "更新后的快照",
+            "schema": {"$ref": "#/definitions/game.Snapshot"}
+          },
+          "400": {
+            "description": "请求参数错误",
+            "schema": {"$ref": "#/definitions/server.ErrorResponse"}
+          }
+        }
+      }
+    },
     "/agents/{agentID}/actions": {
       "get": {
         "tags": ["Agents"],
@@ -184,9 +312,13 @@ const specJSON = `{
           "type": "array",
           "items": {"$ref": "#/definitions/game.SceneAgent"}
         },
-        "templates": {
+        "buildingTemplates": {
           "type": "array",
           "items": {"$ref": "#/definitions/game.BuildingTemplate"}
+        },
+        "agentTemplates": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/game.AgentTemplate"}
         }
       }
     },
@@ -204,9 +336,13 @@ const specJSON = `{
           "type": "array",
           "items": {"$ref": "#/definitions/game.SceneAgent"}
         },
-        "templates": {
+        "buildingTemplates": {
           "type": "array",
           "items": {"$ref": "#/definitions/game.BuildingTemplate"}
+        },
+        "agentTemplates": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/game.AgentTemplate"}
         }
       }
     },
@@ -279,6 +415,18 @@ const specJSON = `{
         "energy": {"$ref": "#/definitions/game.SceneEnergy"}
       }
     },
+    "game.AgentTemplate": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "string"},
+        "label": {"type": "string"},
+        "color": {"type": "integer"},
+        "position": {
+          "type": "array",
+          "items": {"type": "integer"}
+        }
+      }
+    },
     "server.AgentActionRequest": {
       "type": "object",
       "properties": {
@@ -296,6 +444,72 @@ const specJSON = `{
         }
       },
       "required": ["action_type"]
+    },
+    "server.TemplateEnergyRequest": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string"},
+        "capacity": {"type": "integer"},
+        "current": {"type": "integer"},
+        "output": {"type": "integer"},
+        "rate": {"type": "integer"}
+      }
+    },
+    "server.TemplateBuildingRequest": {
+      "type": "object",
+      "properties": {
+        "label": {"type": "string"},
+        "energy": {"$ref": "#/definitions/server.TemplateEnergyRequest"}
+      },
+      "required": ["label"]
+    },
+    "server.TemplateAgentRequest": {
+      "type": "object",
+      "properties": {
+        "label": {"type": "string"},
+        "color": {"type": "integer"},
+        "defaultPosition": {
+          "type": "array",
+          "items": {"type": "integer"},
+          "maxItems": 2,
+          "minItems": 2
+        }
+      },
+      "required": ["label"]
+    },
+    "server.SceneBuildingRequest": {
+      "type": "object",
+      "properties": {
+        "label": {"type": "string"},
+        "templateId": {"type": "string"},
+        "rect": {
+          "type": "array",
+          "items": {"type": "integer"},
+          "maxItems": 4,
+          "minItems": 4
+        },
+        "energy": {"$ref": "#/definitions/server.TemplateEnergyRequest"}
+      },
+      "required": ["label", "rect"]
+    },
+    "server.SceneAgentRequest": {
+      "type": "object",
+      "properties": {
+        "label": {"type": "string"},
+        "templateId": {"type": "string"},
+        "position": {
+          "type": "array",
+          "items": {"type": "integer"},
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "color": {"type": "integer"},
+        "actions": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "required": ["label", "position"]
     },
     "server.SystemSceneUpdateRequest": {
       "type": "object",

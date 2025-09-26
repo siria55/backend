@@ -9,13 +9,14 @@ import (
 
 // Scene 表示火星场景的静态配置。
 type Scene struct {
-	ID         string             `json:"id"`
-	Name       string             `json:"name"`
-	Grid       SceneGrid          `json:"grid"`
-	Dimensions SceneDims          `json:"dimensions"`
-	Buildings  []SceneBuilding    `json:"buildings"`
-	Agents     []SceneAgent       `json:"agents"`
-	Templates  []BuildingTemplate `json:"templates"`
+	ID                string             `json:"id"`
+	Name              string             `json:"name"`
+	Grid              SceneGrid          `json:"grid"`
+	Dimensions        SceneDims          `json:"dimensions"`
+	Buildings         []SceneBuilding    `json:"buildings"`
+	Agents            []SceneAgent       `json:"agents"`
+	BuildingTemplates []BuildingTemplate `json:"buildingTemplates"`
+	AgentTemplates    []AgentTemplate    `json:"agentTemplates"`
 }
 
 // SceneGrid 描述场景网格大小与基本单元尺寸。
@@ -51,21 +52,23 @@ type SceneBuilding struct {
 
 // SceneAgent 描述场景中的角色。
 type SceneAgent struct {
-	ID       string   `json:"id"`
-	Label    string   `json:"label"`
-	Position []int    `json:"position"`
-	Color    int      `json:"color,omitempty"`
-	Actions  []string `json:"actions,omitempty"`
+	ID         string   `json:"id"`
+	TemplateID string   `json:"templateId,omitempty"`
+	Label      string   `json:"label"`
+	Position   []int    `json:"position"`
+	Color      int      `json:"color,omitempty"`
+	Actions    []string `json:"actions,omitempty"`
 }
 
 // Snapshot 表示 system_* 表的整合视图。
 type Snapshot struct {
-	Scene      SceneMeta          `json:"scene"`
-	Grid       SceneGrid          `json:"grid"`
-	Dimensions SceneDims          `json:"dimensions"`
-	Buildings  []SceneBuilding    `json:"buildings"`
-	Agents     []SceneAgent       `json:"agents"`
-	Templates  []BuildingTemplate `json:"templates"`
+	Scene             SceneMeta          `json:"scene"`
+	Grid              SceneGrid          `json:"grid"`
+	Dimensions        SceneDims          `json:"dimensions"`
+	Buildings         []SceneBuilding    `json:"buildings"`
+	Agents            []SceneAgent       `json:"agents"`
+	BuildingTemplates []BuildingTemplate `json:"buildingTemplates"`
+	AgentTemplates    []AgentTemplate    `json:"agentTemplates"`
 }
 
 // SceneMeta 描述场景的基本信息。
@@ -81,12 +84,57 @@ type BuildingTemplate struct {
 	Energy *SceneEnergy `json:"energy,omitempty"`
 }
 
+type AgentTemplate struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Color    int    `json:"color,omitempty"`
+	Position []int  `json:"position,omitempty"`
+}
+
 // UpdateSceneConfigInput 表示更新 system_* 场景配置所需的数据。
 type UpdateSceneConfigInput struct {
 	SceneID    string
 	Name       string
 	Grid       SceneGrid
 	Dimensions SceneDims
+}
+
+type UpdateTemplateEnergyInput struct {
+	Type     *string
+	Capacity *int
+	Current  *int
+	Output   *int
+	Rate     *int
+}
+
+type UpdateBuildingTemplateInput struct {
+	ID     string
+	Label  string
+	Energy *UpdateTemplateEnergyInput
+}
+
+type UpdateAgentTemplateInput struct {
+	ID       string
+	Label    string
+	Color    *int
+	Position *[2]int
+}
+
+type UpdateSceneBuildingInput struct {
+	ID         string
+	Label      string
+	TemplateID *string
+	Rect       [4]int
+	Energy     *UpdateTemplateEnergyInput
+}
+
+type UpdateSceneAgentInput struct {
+	ID         string
+	Label      string
+	TemplateID *string
+	Position   [2]int
+	Color      *int
+	Actions    []string
 }
 
 func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
@@ -133,7 +181,7 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
                COALESCE(b.energy_output, t.energy_output) AS energy_output,
                COALESCE(b.energy_rate, t.energy_rate) AS energy_rate
           FROM system_scene_buildings b
-          LEFT JOIN system_building_templates t ON t.id = b.template_id
+          LEFT JOIN system_template_buildings t ON t.id = b.template_id
          WHERE b.scene_id = $1
          ORDER BY b.id
     `, sceneID)
@@ -194,10 +242,16 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 	}
 
 	agentRows, err := db.QueryContext(ctx, `
-        SELECT id, label, position_x, position_y, color
-          FROM system_scene_agents
-         WHERE scene_id = $1
-         ORDER BY id
+        SELECT a.id,
+               a.template_id,
+               COALESCE(a.label, t.label) AS label,
+               a.position_x,
+               a.position_y,
+               COALESCE(a.color, t.color) AS color
+          FROM system_scene_agents a
+          LEFT JOIN system_template_agents t ON t.id = a.template_id
+         WHERE a.scene_id = $1
+         ORDER BY a.id
     `, sceneID)
 	if err != nil {
 		return Scene{}, err
@@ -208,12 +262,13 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 
 	for agentRows.Next() {
 		var (
-			id, label string
-			x, y      int
-			color     sql.NullInt64
+			id, label  string
+			templateID sql.NullString
+			x, y       int
+			color      sql.NullInt64
 		)
 
-		if err := agentRows.Scan(&id, &label, &x, &y, &color); err != nil {
+		if err := agentRows.Scan(&id, &templateID, &label, &x, &y, &color); err != nil {
 			return Scene{}, err
 		}
 
@@ -221,6 +276,9 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 			ID:       id,
 			Label:    label,
 			Position: []int{x, y},
+		}
+		if templateID.Valid {
+			agent.TemplateID = templateID.String
 		}
 		if color.Valid {
 			agent.Color = int(color.Int64)
@@ -260,7 +318,7 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 
 	templateRows, err := db.QueryContext(ctx, `
         SELECT id, label, energy_type, energy_capacity, energy_current, energy_output, energy_rate
-          FROM system_building_templates
+          FROM system_template_buildings
          ORDER BY id
     `)
 	if err != nil {
@@ -296,13 +354,48 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 			}
 		}
 
-		scene.Templates = append(scene.Templates, BuildingTemplate{
+		scene.BuildingTemplates = append(scene.BuildingTemplates, BuildingTemplate{
 			ID:     id,
 			Label:  label,
 			Energy: energy,
 		})
 	}
-	if err := templateRows.Err(); err != nil {
+	agentTemplateRows, err := db.QueryContext(ctx, `
+        SELECT id, label, color, default_position_x, default_position_y
+          FROM system_template_agents
+         ORDER BY id
+    `)
+	if err != nil {
+		return Scene{}, err
+	}
+	defer agentTemplateRows.Close()
+
+	for agentTemplateRows.Next() {
+		var (
+			id, label string
+			color     sql.NullInt64
+			posX      sql.NullInt64
+			posY      sql.NullInt64
+		)
+
+		if err := agentTemplateRows.Scan(&id, &label, &color, &posX, &posY); err != nil {
+			return Scene{}, err
+		}
+
+		tpl := AgentTemplate{
+			ID:    id,
+			Label: label,
+		}
+		if color.Valid {
+			tpl.Color = int(color.Int64)
+		}
+		if posX.Valid && posY.Valid {
+			tpl.Position = []int{int(posX.Int64), int(posY.Int64)}
+		}
+
+		scene.AgentTemplates = append(scene.AgentTemplates, tpl)
+	}
+	if err := agentTemplateRows.Err(); err != nil {
 		return Scene{}, err
 	}
 
