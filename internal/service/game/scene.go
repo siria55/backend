@@ -47,11 +47,11 @@ type SceneBuilding struct {
 
 // SceneAgent 描述场景中的角色。
 type SceneAgent struct {
-	ID        string   `json:"id"`
-	Label     string   `json:"label"`
-	Position  []int    `json:"position"`
-	Color     int      `json:"color,omitempty"`
-	Behaviors []string `json:"behaviors,omitempty"`
+	ID       string   `json:"id"`
+	Label    string   `json:"label"`
+	Position []int    `json:"position"`
+	Color    int      `json:"color,omitempty"`
+	Actions  []string `json:"actions,omitempty"`
 }
 
 //go:embed assets/mars_outpost.json

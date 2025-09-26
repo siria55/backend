@@ -65,14 +65,14 @@
       "label": "阿瑞斯-01 指挥体",
       "position": [18, 14],
       "color": 11541703,
-      "behaviors": ["move_left", "move_right", "move_up", "move_down"]
+      "actions": ["move_left", "move_right", "move_up", "move_down"]
     },
     {
       "id": "support-02",
       "label": "支援单位-02",
       "position": [22, 14],
       "color": 11576490,
-      "behaviors": ["move_left", "move_right", "move_up", "move_down"]
+      "actions": ["move_left", "move_right", "move_up", "move_down"]
     }
   ]
 }
