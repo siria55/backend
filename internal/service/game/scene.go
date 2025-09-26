@@ -9,12 +9,13 @@ import (
 
 // Scene 表示火星场景的静态配置。
 type Scene struct {
-	ID         string          `json:"id"`
-	Name       string          `json:"name"`
-	Grid       SceneGrid       `json:"grid"`
-	Dimensions SceneDims       `json:"dimensions"`
-	Buildings  []SceneBuilding `json:"buildings"`
-	Agents     []SceneAgent    `json:"agents"`
+	ID         string             `json:"id"`
+	Name       string             `json:"name"`
+	Grid       SceneGrid          `json:"grid"`
+	Dimensions SceneDims          `json:"dimensions"`
+	Buildings  []SceneBuilding    `json:"buildings"`
+	Agents     []SceneAgent       `json:"agents"`
+	Templates  []BuildingTemplate `json:"templates"`
 }
 
 // SceneGrid 描述场景网格大小与基本单元尺寸。
@@ -41,10 +42,11 @@ type SceneEnergy struct {
 
 // SceneBuilding 描述场景中的建筑。
 type SceneBuilding struct {
-	ID     string       `json:"id"`
-	Label  string       `json:"label"`
-	Rect   []int        `json:"rect"`
-	Energy *SceneEnergy `json:"energy,omitempty"`
+	ID         string       `json:"id"`
+	TemplateID string       `json:"templateId,omitempty"`
+	Label      string       `json:"label"`
+	Rect       []int        `json:"rect"`
+	Energy     *SceneEnergy `json:"energy,omitempty"`
 }
 
 // SceneAgent 描述场景中的角色。
@@ -58,17 +60,25 @@ type SceneAgent struct {
 
 // Snapshot 表示 system_* 表的整合视图。
 type Snapshot struct {
-	Scene      SceneMeta       `json:"scene"`
-	Grid       SceneGrid       `json:"grid"`
-	Dimensions SceneDims       `json:"dimensions"`
-	Buildings  []SceneBuilding `json:"buildings"`
-	Agents     []SceneAgent    `json:"agents"`
+	Scene      SceneMeta          `json:"scene"`
+	Grid       SceneGrid          `json:"grid"`
+	Dimensions SceneDims          `json:"dimensions"`
+	Buildings  []SceneBuilding    `json:"buildings"`
+	Agents     []SceneAgent       `json:"agents"`
+	Templates  []BuildingTemplate `json:"templates"`
 }
 
 // SceneMeta 描述场景的基本信息。
 type SceneMeta struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// BuildingTemplate 描述系统建筑模板。
+type BuildingTemplate struct {
+	ID     string       `json:"id"`
+	Label  string       `json:"label"`
+	Energy *SceneEnergy `json:"energy,omitempty"`
 }
 
 // UpdateSceneConfigInput 表示更新 system_* 场景配置所需的数据。
@@ -110,11 +120,22 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 	}
 
 	buildingRows, err := db.QueryContext(ctx, `
-        SELECT id, label, position_x, position_y, size_width, size_height,
-               energy_type, energy_capacity, energy_current, energy_output, energy_rate
-          FROM system_scene_buildings
-         WHERE scene_id = $1
-         ORDER BY id
+        SELECT b.id,
+               b.template_id,
+               COALESCE(b.label, t.label) AS label,
+               b.position_x,
+               b.position_y,
+               b.size_width,
+               b.size_height,
+               COALESCE(b.energy_type, t.energy_type) AS energy_type,
+               COALESCE(b.energy_capacity, t.energy_capacity) AS energy_capacity,
+               COALESCE(b.energy_current, t.energy_current) AS energy_current,
+               COALESCE(b.energy_output, t.energy_output) AS energy_output,
+               COALESCE(b.energy_rate, t.energy_rate) AS energy_rate
+          FROM system_scene_buildings b
+          LEFT JOIN system_building_templates t ON t.id = b.template_id
+         WHERE b.scene_id = $1
+         ORDER BY b.id
     `, sceneID)
 	if err != nil {
 		return Scene{}, err
@@ -124,13 +145,17 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 	for buildingRows.Next() {
 		var (
 			id, label                       string
+			templateID                      sql.NullString
 			posX, posY, width, height       int
 			energyType                      sql.NullString
 			capacity, current, output, rate sql.NullInt64
 		)
 
 		if err := buildingRows.Scan(
-			&id, &label, &posX, &posY, &width, &height,
+			&id,
+			&templateID,
+			&label,
+			&posX, &posY, &width, &height,
 			&energyType, &capacity, &current, &output, &rate,
 		); err != nil {
 			return Scene{}, err
@@ -153,12 +178,16 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 			}
 		}
 
-		scene.Buildings = append(scene.Buildings, SceneBuilding{
+		building := SceneBuilding{
 			ID:     id,
 			Label:  label,
 			Rect:   []int{posX, posY, width, height},
 			Energy: energy,
-		})
+		}
+		if templateID.Valid {
+			building.TemplateID = templateID.String
+		}
+		scene.Buildings = append(scene.Buildings, building)
 	}
 	if err := buildingRows.Err(); err != nil {
 		return Scene{}, err
@@ -227,6 +256,54 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 		if err := actionRows.Err(); err != nil {
 			return Scene{}, err
 		}
+	}
+
+	templateRows, err := db.QueryContext(ctx, `
+        SELECT id, label, energy_type, energy_capacity, energy_current, energy_output, energy_rate
+          FROM system_building_templates
+         ORDER BY id
+    `)
+	if err != nil {
+		return Scene{}, err
+	}
+	defer templateRows.Close()
+
+	for templateRows.Next() {
+		var (
+			id, label                       string
+			energyType                      sql.NullString
+			capacity, current, output, rate sql.NullInt64
+		)
+
+		if err := templateRows.Scan(&id, &label, &energyType, &capacity, &current, &output, &rate); err != nil {
+			return Scene{}, err
+		}
+
+		var energy *SceneEnergy
+		if energyType.Valid {
+			energy = &SceneEnergy{Type: energyType.String}
+			if capacity.Valid {
+				energy.Capacity = int(capacity.Int64)
+			}
+			if current.Valid {
+				energy.Current = int(current.Int64)
+			}
+			if output.Valid {
+				energy.Output = int(output.Int64)
+			}
+			if rate.Valid {
+				energy.Rate = int(rate.Int64)
+			}
+		}
+
+		scene.Templates = append(scene.Templates, BuildingTemplate{
+			ID:     id,
+			Label:  label,
+			Energy: energy,
+		})
+	}
+	if err := templateRows.Err(); err != nil {
+		return Scene{}, err
 	}
 
 	return scene, nil

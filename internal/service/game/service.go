@@ -36,6 +36,7 @@ func (s *Service) Snapshot() Snapshot {
 		Dimensions: s.scene.Dimensions,
 		Buildings:  s.scene.Buildings,
 		Agents:     s.scene.Agents,
+		Templates:  s.scene.Templates,
 	}
 }
 
