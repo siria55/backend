@@ -2,8 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"eeo/backend/internal/config"
 	actionservice "eeo/backend/internal/service/action"
@@ -49,6 +51,50 @@ func New(cfg config.Config, gameSvc *game.Service, actionSvc *actionservice.Serv
 		v1.GET("/game/scene", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gameSvc.Scene())
 		})
+
+		system := v1.Group("/system")
+		{
+			system.GET("/scene", func(c *gin.Context) {
+				c.JSON(http.StatusOK, gameSvc.Snapshot())
+			})
+
+			system.PUT("/scene", func(c *gin.Context) {
+				var req updateSceneRequest
+				if err := c.ShouldBindJSON(&req); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+
+				if strings.TrimSpace(req.Name) == "" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+					return
+				}
+
+				snapshot, err := gameSvc.UpdateSceneConfig(c.Request.Context(), game.UpdateSceneConfigInput{
+					SceneID: req.SceneID,
+					Name:    req.Name,
+					Grid: game.SceneGrid{
+						Cols:     req.Grid.Cols,
+						Rows:     req.Grid.Rows,
+						TileSize: req.Grid.TileSize,
+					},
+					Dimensions: game.SceneDims{
+						Width:  req.Dimensions.Width,
+						Height: req.Dimensions.Height,
+					},
+				})
+				if err != nil {
+					if errors.Is(err, game.ErrInvalidSceneConfig) {
+						c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+						return
+					}
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+
+				c.JSON(http.StatusOK, snapshot)
+			})
+		}
 
 		agents := v1.Group("/agents")
 		{
@@ -140,6 +186,24 @@ type logActionRequest struct {
 	ResultStatus  string          `json:"result_status"`
 	ResultMessage string          `json:"result_message"`
 	Actions       []string        `json:"actions"`
+}
+
+type updateSceneRequest struct {
+	SceneID    string               `json:"scene_id" binding:"required"`
+	Name       string               `json:"name" binding:"required"`
+	Grid       updateSceneGrid      `json:"grid" binding:"required"`
+	Dimensions updateSceneDimension `json:"dimensions" binding:"required"`
+}
+
+type updateSceneGrid struct {
+	Cols     int `json:"cols"`
+	Rows     int `json:"rows"`
+	TileSize int `json:"tileSize"`
+}
+
+type updateSceneDimension struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
 }
 
 // Run 监听并启动 HTTP 服务。

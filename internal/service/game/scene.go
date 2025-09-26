@@ -56,6 +56,29 @@ type SceneAgent struct {
 	Actions  []string `json:"actions,omitempty"`
 }
 
+// Snapshot 表示 system_* 表的整合视图。
+type Snapshot struct {
+	Scene      SceneMeta       `json:"scene"`
+	Grid       SceneGrid       `json:"grid"`
+	Dimensions SceneDims       `json:"dimensions"`
+	Buildings  []SceneBuilding `json:"buildings"`
+	Agents     []SceneAgent    `json:"agents"`
+}
+
+// SceneMeta 描述场景的基本信息。
+type SceneMeta struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// UpdateSceneConfigInput 表示更新 system_* 场景配置所需的数据。
+type UpdateSceneConfigInput struct {
+	SceneID    string
+	Name       string
+	Grid       SceneGrid
+	Dimensions SceneDims
+}
+
 func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
