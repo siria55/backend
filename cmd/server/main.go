@@ -36,7 +36,9 @@ func main() {
 		}
 	}()
 
-	gameSvc, err := gameservice.New()
+	const defaultSceneID = "mars_outpost_min"
+
+	gameSvc, err := gameservice.New(db, defaultSceneID)
 	if err != nil {
 		log.Fatalf("load scene failed: %v", err)
 	}
