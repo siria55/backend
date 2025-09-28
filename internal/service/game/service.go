@@ -15,7 +15,7 @@ type Service struct {
 	scene Scene
 }
 
-const DefaultDrainFactor = 0.002
+const DefaultDrainFactor = 1.0
 
 // New 返回默认的 Game 服务实例，并加载初始场景配置。
 func New(db *sql.DB, sceneID string) (*Service, error) {
@@ -422,12 +422,12 @@ func (s *Service) AdvanceEnergyState(ctx context.Context, seconds float64, drain
 	}
 
 	netLoad := totalConsumption - totalOutput
-	if netLoad <= 0 {
+	if netLoad == 0 {
 		return s.scene, nil
 	}
 
-	drain := netLoad * drainFactor * seconds
-	if drain <= 0 {
+	change := netLoad * drainFactor * seconds
+	if change == 0 {
 		return s.scene, nil
 	}
 
@@ -441,14 +441,32 @@ func (s *Service) AdvanceEnergyState(ctx context.Context, seconds float64, drain
 		}
 	}()
 
-	for _, building := range storageBuildings {
-		current := float64(building.Energy.Current)
-		updated := int(math.Max(math.Round(current-drain), 0))
-		if updated == building.Energy.Current {
-			continue
+	if netLoad > 0 {
+		for _, building := range storageBuildings {
+			current := float64(building.Energy.Current)
+			updated := int(math.Max(math.Round(current-change), 0))
+			if updated == building.Energy.Current {
+				continue
+			}
+			if _, err = tx.ExecContext(ctx, `UPDATE system_scene_buildings SET energy_current = $1 WHERE id = $2`, updated, building.ID); err != nil {
+				return Scene{}, err
+			}
 		}
-		if _, err = tx.ExecContext(ctx, `UPDATE system_scene_buildings SET energy_current = $1 WHERE id = $2`, updated, building.ID); err != nil {
-			return Scene{}, err
+	} else { // netLoad < 0, surplus energy
+		gain := -change
+		for _, building := range storageBuildings {
+			capacity := float64(building.Energy.Capacity)
+			if capacity <= 0 {
+				continue
+			}
+			current := float64(building.Energy.Current)
+			updated := int(math.Min(math.Round(current+gain), capacity))
+			if updated == building.Energy.Current {
+				continue
+			}
+			if _, err = tx.ExecContext(ctx, `UPDATE system_scene_buildings SET energy_current = $1 WHERE id = $2`, updated, building.ID); err != nil {
+				return Scene{}, err
+			}
 		}
 	}
 
