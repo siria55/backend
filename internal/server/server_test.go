@@ -28,6 +28,11 @@ type mockGameService struct {
 	}
 	energyCalls int
 
+	maintainResult game.MaintainEnergyResult
+	maintainErr    error
+	maintainCalls  int
+	lastMaintainID string
+
 	lastBuildingUpdate struct {
 		id      string
 		current float64
@@ -161,6 +166,20 @@ func (m *mockGameService) UpdateAgentRuntimePosition(_ context.Context, agentID 
 	}
 
 	return game.SceneAgent{}, fmt.Errorf("agent %s not found", agentID)
+}
+
+func (m *mockGameService) MaintainEnergyNonNegative(_ context.Context, agentID string) (game.MaintainEnergyResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastMaintainID = agentID
+	m.maintainCalls++
+	if m.maintainErr != nil {
+		return game.MaintainEnergyResult{}, m.maintainErr
+	}
+	if m.maintainResult.Scene.ID == "" {
+		return game.MaintainEnergyResult{Scene: m.scene}, nil
+	}
+	return m.maintainResult, nil
 }
 
 func newTestServer() (*Server, *mockGameService) {

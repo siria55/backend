@@ -73,6 +73,7 @@ func (s *Server) registerRoutes() {
 			gameRoutes.GET("/scene/stream", s.streamGameScene)
 			gameRoutes.POST("/scene/buildings/:buildingID/energy", s.updateGameBuildingEnergy)
 			gameRoutes.PUT("/scene/agents/:agentID/position", s.updateGameAgentPosition)
+			gameRoutes.POST("/scene/agents/:agentID/behaviors/maintain-energy", s.maintainEnergyBalance)
 		}
 
 		system := v1.Group("/system")
@@ -201,6 +202,43 @@ func (s *Server) updateGameAgentPosition(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, agent)
+}
+
+func (s *Server) maintainEnergyBalance(c *gin.Context) {
+	agentID := c.Param("agentID")
+	if strings.TrimSpace(agentID) == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "agentID is required"})
+		return
+	}
+
+	result, err := s.gameSvc.MaintainEnergyNonNegative(c.Request.Context(), agentID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, game.ErrInvalidSceneEntity):
+			status = http.StatusBadRequest
+		case errors.Is(err, game.ErrSolarTemplateMissing):
+			status = http.StatusFailedDependency
+		case errors.Is(err, game.ErrNoAvailablePlacement):
+			status = http.StatusConflict
+		}
+		c.JSON(status, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	if s.sceneStream != nil {
+		s.sceneStream.broadcast(result.Scene)
+	}
+
+	response := MaintainEnergyResponse{
+		Scene:         result.Scene,
+		Created:       result.Created,
+		NetFlowBefore: result.NetFlowBefore,
+		NetFlowAfter:  result.NetFlowAfter,
+		TowersBuilt:   result.TowersBuilt,
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (s *Server) updateSystemBuildingTemplate(c *gin.Context) {
@@ -531,6 +569,14 @@ type BuildingEnergyUpdateRequest struct {
 type AgentPositionUpdateRequest struct {
 	X float64 `json:"x"`
 	Y float64 `json:"y"`
+}
+
+type MaintainEnergyResponse struct {
+	Scene         game.Scene           `json:"scene"`
+	Created       []game.SceneBuilding `json:"created"`
+	NetFlowBefore float64              `json:"netFlowBefore"`
+	NetFlowAfter  float64              `json:"netFlowAfter"`
+	TowersBuilt   int                  `json:"towersBuilt"`
 }
 
 const swaggerUIHTML = `<!DOCTYPE html>

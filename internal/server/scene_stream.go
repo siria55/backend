@@ -156,6 +156,26 @@ func (s *sceneStream) initialPayload() []byte {
 	return payload
 }
 
+func (s *sceneStream) broadcast(scene game.Scene) {
+	payload, err := json.Marshal(scene)
+	if err != nil {
+		log.Printf("sceneStream: marshal scene failed: %v", err)
+		return
+	}
+
+	s.mu.Lock()
+	s.lastPayload = payload
+	clients := make([]*sceneStreamClient, 0, len(s.clients))
+	for client := range s.clients {
+		clients = append(clients, client)
+	}
+	s.mu.Unlock()
+
+	for _, client := range clients {
+		client.enqueue(payload)
+	}
+}
+
 func (s *sceneStream) stop() {
 	s.cancel()
 

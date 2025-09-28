@@ -99,6 +99,39 @@ const specJSON = `{
         }
       }
     },
+    "/game/scene/agents/{agentID}/behaviors/maintain-energy": {
+      "post": {
+        "tags": ["Game"],
+        "summary": "保持电量不减少（自动建造太阳能塔）",
+        "produces": ["application/json"],
+        "parameters": [
+          {
+            "name": "agentID",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作结果",
+            "schema": {"$ref": "#/definitions/server.MaintainEnergyResponse"}
+          },
+          "400": {
+            "description": "请求参数错误",
+            "schema": {"$ref": "#/definitions/server.ErrorResponse"}
+          },
+          "409": {
+            "description": "缺少可用空间或资源冲突",
+            "schema": {"$ref": "#/definitions/server.ErrorResponse"}
+          },
+          "424": {
+            "description": "缺少太阳能塔模板",
+            "schema": {"$ref": "#/definitions/server.ErrorResponse"}
+          }
+        }
+      }
+    },
     "/system/scene": {
       "get": {
         "tags": ["System"],
@@ -586,6 +619,19 @@ const specJSON = `{
         }
       },
       "required": ["label", "position"]
+    },
+    "server.MaintainEnergyResponse": {
+      "type": "object",
+      "properties": {
+        "scene": {"$ref": "#/definitions/game.Scene"},
+        "created": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/game.SceneBuilding"}
+        },
+        "netFlowBefore": {"type": "number"},
+        "netFlowAfter": {"type": "number"},
+        "towersBuilt": {"type": "integer"}
+      }
     },
     "server.SystemSceneUpdateRequest": {
       "type": "object",
