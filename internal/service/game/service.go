@@ -317,6 +317,37 @@ func (s *Service) UpdateSceneAgent(ctx context.Context, in UpdateSceneAgentInput
 	return s.Snapshot(), nil
 }
 
+// UpdateAgentRuntimePosition 更新运行时 Agent 坐标。
+func (s *Service) UpdateAgentRuntimePosition(ctx context.Context, agentID string, posX, posY float64) (SceneAgent, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return SceneAgent{}, fmt.Errorf("%w: agent id required", ErrInvalidSceneEntity)
+	}
+
+	if _, err := s.db.ExecContext(ctx, `
+        INSERT INTO agent_runtime_state (agent_id, pos_x, pos_y)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (agent_id)
+        DO UPDATE SET pos_x = EXCLUDED.pos_x,
+                      pos_y = EXCLUDED.pos_y,
+                      updated_at = NOW()
+    `, agentID, posX, posY); err != nil {
+		return SceneAgent{}, err
+	}
+
+	if err := s.reloadScene(); err != nil {
+		return SceneAgent{}, err
+	}
+
+	for _, agent := range s.scene.Agents {
+		if agent.ID == agentID {
+			return agent, nil
+		}
+	}
+
+	return SceneAgent{}, fmt.Errorf("%w: agent %s not found", ErrInvalidSceneEntity, agentID)
+}
+
 func extractTemplateEnergy(in *UpdateTemplateEnergyInput) (sql.NullString, sql.NullInt64, sql.NullInt64, sql.NullInt64, sql.NullInt64) {
 	if in == nil {
 		return sql.NullString{}, sql.NullInt64{}, sql.NullInt64{}, sql.NullInt64{}, sql.NullInt64{}

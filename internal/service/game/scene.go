@@ -52,12 +52,12 @@ type SceneBuilding struct {
 
 // SceneAgent 描述场景中的角色。
 type SceneAgent struct {
-	ID         string   `json:"id"`
-	TemplateID string   `json:"templateId,omitempty"`
-	Label      string   `json:"label"`
-	Position   []int    `json:"position"`
-	Color      int      `json:"color,omitempty"`
-	Actions    []string `json:"actions,omitempty"`
+	ID         string    `json:"id"`
+	TemplateID string    `json:"templateId,omitempty"`
+	Label      string    `json:"label"`
+	Position   []float64 `json:"position"`
+	Color      int       `json:"color,omitempty"`
+	Actions    []string  `json:"actions,omitempty"`
 }
 
 // Snapshot 表示 system_* 表的整合视图。
@@ -242,16 +242,17 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 	}
 
 	agentRows, err := db.QueryContext(ctx, `
-        SELECT a.id,
-               a.template_id,
-               COALESCE(a.label, t.label) AS label,
-               a.position_x,
-               a.position_y,
-               COALESCE(a.color, t.color) AS color
-          FROM system_scene_agents a
-          LEFT JOIN system_template_agents t ON t.id = a.template_id
-         WHERE a.scene_id = $1
-         ORDER BY a.id
+        SELECT s.id,
+               s.template_id,
+               COALESCE(s.label, t.label) AS label,
+               COALESCE(r.pos_x, s.position_x::double precision) AS pos_x,
+               COALESCE(r.pos_y, s.position_y::double precision) AS pos_y,
+               COALESCE(s.color, t.color) AS color
+          FROM system_scene_agents s
+          LEFT JOIN system_template_agents t ON t.id = s.template_id
+          LEFT JOIN agent_runtime_state r ON r.agent_id = s.id
+         WHERE s.scene_id = $1
+         ORDER BY s.id
     `, sceneID)
 	if err != nil {
 		return Scene{}, err
@@ -264,7 +265,7 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 		var (
 			id, label  string
 			templateID sql.NullString
-			x, y       int
+			x, y       float64
 			color      sql.NullInt64
 		)
 
@@ -275,7 +276,7 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 		agent := SceneAgent{
 			ID:       id,
 			Label:    label,
-			Position: []int{x, y},
+			Position: []float64{x, y},
 		}
 		if templateID.Valid {
 			agent.TemplateID = templateID.String

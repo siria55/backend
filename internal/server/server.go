@@ -72,6 +72,7 @@ func (s *Server) registerRoutes() {
 			gameRoutes.GET("/scene", s.getGameScene)
 			gameRoutes.GET("/scene/stream", s.streamGameScene)
 			gameRoutes.POST("/scene/buildings/:buildingID/energy", s.updateGameBuildingEnergy)
+			gameRoutes.PUT("/scene/agents/:agentID/position", s.updateGameAgentPosition)
 		}
 
 		system := v1.Group("/system")
@@ -178,6 +179,28 @@ func (s *Server) updateGameBuildingEnergy(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, building)
+}
+
+func (s *Server) updateGameAgentPosition(c *gin.Context) {
+	agentID := c.Param("agentID")
+	if strings.TrimSpace(agentID) == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "agentID is required"})
+		return
+	}
+
+	var req AgentPositionUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	agent, err := s.gameSvc.UpdateAgentRuntimePosition(c.Request.Context(), agentID, req.X, req.Y)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, agent)
 }
 
 func (s *Server) updateSystemBuildingTemplate(c *gin.Context) {
@@ -503,6 +526,11 @@ type ErrorResponse struct {
 
 type BuildingEnergyUpdateRequest struct {
 	Current float64 `json:"current" binding:"required"`
+}
+
+type AgentPositionUpdateRequest struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 const swaggerUIHTML = `<!DOCTYPE html>

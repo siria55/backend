@@ -17,4 +17,5 @@ type GameService interface {
 	UpdateSceneAgent(context.Context, game.UpdateSceneAgentInput) (game.Snapshot, error)
 	UpdateBuildingEnergyCurrent(context.Context, string, float64) (game.SceneBuilding, error)
 	AdvanceEnergyState(context.Context, float64, float64) (game.Scene, error)
+	UpdateAgentRuntimePosition(context.Context, string, float64, float64) (game.SceneAgent, error)
 }

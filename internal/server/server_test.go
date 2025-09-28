@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,6 +33,13 @@ type mockGameService struct {
 		current float64
 	}
 	buildingUpdateCalls int
+
+	lastRuntimeUpdate struct {
+		id string
+		x  float64
+		y  float64
+	}
+	runtimeUpdateCalls int
 }
 
 func newMockGameService() *mockGameService {
@@ -122,6 +130,30 @@ func (m *mockGameService) AdvanceEnergyState(_ context.Context, seconds float64,
 	}{seconds: seconds, drainFactor: drainFactor}
 	m.energyCalls++
 	return m.scene, nil
+}
+
+func (m *mockGameService) UpdateAgentRuntimePosition(_ context.Context, agentID string, posX, posY float64) (game.SceneAgent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.lastRuntimeUpdate = struct {
+		id string
+		x  float64
+		y  float64
+	}{id: agentID, x: posX, y: posY}
+	m.runtimeUpdateCalls++
+
+	for idx, agent := range m.scene.Agents {
+		if agent.ID == agentID {
+			updated := agent
+			updated.Position = []float64{posX, posY}
+			m.scene.Agents[idx] = updated
+			m.snapshot.Agents = m.scene.Agents
+			return updated, nil
+		}
+	}
+
+	return game.SceneAgent{}, fmt.Errorf("agent %s not found", agentID)
 }
 
 func newTestServer() (*Server, *mockGameService) {
