@@ -1,12 +1,13 @@
 package server
 
 import (
-	"encoding/json"
-	"errors"
-	"net/http"
-	"strconv"
-	"strings"
-	"time"
+    "encoding/json"
+    "errors"
+    "log"
+    "net/http"
+    "strconv"
+    "strings"
+    "time"
 
 	"eeo/backend/docs"
 	"eeo/backend/internal/config"
@@ -73,7 +74,7 @@ func (s *Server) registerRoutes() {
 			gameRoutes.GET("/scene/stream", s.streamGameScene)
 			gameRoutes.POST("/scene/buildings/:buildingID/energy", s.updateGameBuildingEnergy)
 			gameRoutes.PUT("/scene/agents/:agentID/position", s.updateGameAgentPosition)
-			gameRoutes.POST("/scene/agents/:agentID/behaviors/maintain-energy", s.maintainEnergyBalance)
+			gameRoutes.Any("/scene/agents/:agentID/behaviors/maintain-energy", s.handleMaintainEnergy)
 		}
 
 		system := v1.Group("/system")
@@ -205,42 +206,55 @@ func (s *Server) updateGameAgentPosition(c *gin.Context) {
 	c.JSON(http.StatusOK, agent)
 }
 
+func (s *Server) handleMaintainEnergy(c *gin.Context) {
+	if c.Request.Method != http.MethodPost {
+		c.JSON(http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed, use POST"})
+		return
+	}
+	s.maintainEnergyBalance(c)
+}
+
 func (s *Server) maintainEnergyBalance(c *gin.Context) {
-	agentID := c.Param("agentID")
-	if strings.TrimSpace(agentID) == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "agentID is required"})
-		return
+    agentID := c.Param("agentID")
+    if strings.TrimSpace(agentID) == "" {
+        c.JSON(http.StatusBadRequest, ErrorResponse{Error: "agentID is required"})
+        return
+    }
+
+    log.Printf("maintainEnergyBalance: start agent=%s", agentID)
+
+    result, err := s.gameSvc.MaintainEnergyNonNegative(c.Request.Context(), agentID)
+    if err != nil {
+        log.Printf("maintainEnergyBalance: error agent=%s err=%v", agentID, err)
+        status := http.StatusInternalServerError
+        switch {
+        case errors.Is(err, game.ErrInvalidSceneEntity):
+            status = http.StatusBadRequest
+        case errors.Is(err, game.ErrSolarTemplateMissing):
+            status = http.StatusFailedDependency
+        case errors.Is(err, game.ErrNoAvailablePlacement):
+            status = http.StatusConflict
+        }
+        c.JSON(status, ErrorResponse{Error: err.Error()})
+        return
+    }
+
+    if s.sceneStream != nil {
+        s.sceneStream.broadcast(result.Scene)
 	}
 
-	result, err := s.gameSvc.MaintainEnergyNonNegative(c.Request.Context(), agentID)
-	if err != nil {
-		status := http.StatusInternalServerError
-		switch {
-		case errors.Is(err, game.ErrInvalidSceneEntity):
-			status = http.StatusBadRequest
-		case errors.Is(err, game.ErrSolarTemplateMissing):
-			status = http.StatusFailedDependency
-		case errors.Is(err, game.ErrNoAvailablePlacement):
-			status = http.StatusConflict
-		}
-		c.JSON(status, ErrorResponse{Error: err.Error()})
-		return
-	}
+    response := MaintainEnergyResponse{
+        Scene:         result.Scene,
+        Created:       result.Created,
+        NetFlowBefore: result.NetFlowBefore,
+        NetFlowAfter:  result.NetFlowAfter,
+        TowersBuilt:   result.TowersBuilt,
+        Relocation:    result.Relocation,
+    }
 
-	if s.sceneStream != nil {
-		s.sceneStream.broadcast(result.Scene)
-	}
+    log.Printf("maintainEnergyBalance: success agent=%s towers=%d relocation=%v", agentID, result.TowersBuilt, result.Relocation != nil)
 
-	response := MaintainEnergyResponse{
-		Scene:         result.Scene,
-		Created:       result.Created,
-		NetFlowBefore: result.NetFlowBefore,
-		NetFlowAfter:  result.NetFlowAfter,
-		TowersBuilt:   result.TowersBuilt,
-		Relocation:    result.Relocation,
-	}
-
-	c.JSON(http.StatusOK, response)
+    c.JSON(http.StatusOK, response)
 }
 
 func (s *Server) updateSystemBuildingTemplate(c *gin.Context) {

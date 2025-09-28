@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"math"
 	"strconv"
 	"strings"
@@ -73,6 +74,8 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 		return result, scene, nil, nil
 	}
 
+	log.Printf("EnergyMaintainer: start agent=%s netFlow=%.2f deficit=%.2f towers=%d", agent.ID, netFlow, deficit, towersNeeded)
+
 	width, height := determineSolarTowerFootprint(scene.Buildings)
 	baseOccupied := append([]SceneBuilding(nil), scene.Buildings...)
 	occupied := append([]SceneBuilding(nil), baseOccupied...)
@@ -89,11 +92,13 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 		if !ok {
 			tile, placement, found := findRelocationAndPlacement(currentTile, width, height, occupied, scene.Dimensions)
 			if !found {
+				log.Printf("EnergyMaintainer: no placement available agent=%s built=%d/%d", agent.ID, len(planned), towersNeeded)
 				return MaintainEnergyResult{}, Scene{}, relocation, ErrNoAvailablePlacement
 			}
 			currentTile = tile
 			if relocation == nil || relocation.Position[0] != float64(tile[0]) || relocation.Position[1] != float64(tile[1]) {
 				relocation = &AgentRelocation{ID: agent.ID, Position: [2]float64{float64(tile[0]), float64(tile[1])}}
+				log.Printf("EnergyMaintainer: relocation agent=%s to (%d,%d)", agent.ID, tile[0], tile[1])
 			}
 			occupied = append([]SceneBuilding(nil), baseOccupied...)
 			planned = planned[:0]
@@ -102,6 +107,7 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 		}
 
 		if !areaIsFree(occupied, x, y, width, height) {
+			log.Printf("EnergyMaintainer: placement blocked agent=%s at (%d,%d)", agent.ID, x, y)
 			return MaintainEnergyResult{}, Scene{}, relocation, ErrNoAvailablePlacement
 		}
 
@@ -117,6 +123,7 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 			height: height,
 		})
 		occupied = append(occupied, SceneBuilding{ID: id, TemplateID: solarTowerTemplateID, Rect: []int{x, y, width, height}})
+		log.Printf("EnergyMaintainer: planned tower %d/%d at (%d,%d)", len(planned), towersNeeded, x, y)
 	}
 
 	tx, err := m.db.BeginTx(ctx, nil)
@@ -162,6 +169,8 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 	result.NetFlowAfter = balanceAfter.output - balanceAfter.consumption
 	result.TowersBuilt = len(created)
 	result.Relocation = relocation
+
+	log.Printf("EnergyMaintainer: success agent=%s towersBuilt=%d relocation=%v", agent.ID, len(planned), relocation != nil)
 
 	return result, updatedScene, relocation, nil
 }

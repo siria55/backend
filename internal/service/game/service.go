@@ -1,12 +1,13 @@
 package game
 
 import (
-	"context"
-	"database/sql"
-	"errors"
-	"fmt"
-	"math"
-	"strings"
+    "context"
+    "database/sql"
+    "errors"
+    "fmt"
+    "log"
+    "math"
+    "strings"
 )
 
 // Service 负责提供游戏场景配置等业务能力。
@@ -563,10 +564,10 @@ func (s *Service) AdvanceEnergyState(ctx context.Context, seconds float64, drain
 
 // MaintainEnergyNonNegative 根据当前能耗情况自动补充太阳能塔直至净变化不再为负。
 func (s *Service) MaintainEnergyNonNegative(ctx context.Context, agentID string) (MaintainEnergyResult, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return MaintainEnergyResult{}, fmt.Errorf("%w: agent id required", ErrInvalidSceneEntity)
-	}
+    agentID = strings.TrimSpace(agentID)
+    if agentID == "" {
+        return MaintainEnergyResult{}, fmt.Errorf("%w: agent id required", ErrInvalidSceneEntity)
+    }
 
 	var targetAgent SceneAgent
 	var found bool
@@ -577,28 +578,33 @@ func (s *Service) MaintainEnergyNonNegative(ctx context.Context, agentID string)
 			break
 		}
 	}
-	if !found {
-		return MaintainEnergyResult{}, fmt.Errorf("%w: agent %s not found", ErrInvalidSceneEntity, agentID)
-	}
+    if !found {
+        return MaintainEnergyResult{}, fmt.Errorf("%w: agent %s not found", ErrInvalidSceneEntity, agentID)
+    }
 
-	if s.maintainer == nil {
-		s.maintainer = newEnergyMaintainer(s.db, sceneLoader)
-	}
+    if s.maintainer == nil {
+        s.maintainer = newEnergyMaintainer(s.db, sceneLoader)
+    }
 
-	result, updatedScene, relocation, err := s.maintainer.Maintain(ctx, s.scene, targetAgent)
-	if err != nil {
-		return MaintainEnergyResult{}, err
-	}
+    log.Printf("MaintainEnergyNonNegative: start agent=%s", agentID)
 
-	if relocation != nil {
-		if _, err := s.UpdateAgentRuntimePosition(ctx, relocation.ID, relocation.Position[0], relocation.Position[1]); err != nil {
+    result, updatedScene, relocation, err := s.maintainer.Maintain(ctx, s.scene, targetAgent)
+    if err != nil {
+        log.Printf("MaintainEnergyNonNegative: error agent=%s err=%v", agentID, err)
+        return MaintainEnergyResult{}, err
+    }
+
+    if relocation != nil {
+        if _, err := s.UpdateAgentRuntimePosition(ctx, relocation.ID, relocation.Position[0], relocation.Position[1]); err != nil {
 			return MaintainEnergyResult{}, err
 		}
-		result.Scene = s.scene
-		result.Relocation = relocation
-	} else {
-		s.scene = updatedScene
-	}
+        result.Scene = s.scene
+        result.Relocation = relocation
+    } else {
+        s.scene = updatedScene
+    }
 
-	return result, nil
+    log.Printf("MaintainEnergyNonNegative: success agent=%s towers=%d relocation=%v", agentID, result.TowersBuilt, relocation != nil)
+
+    return result, nil
 }

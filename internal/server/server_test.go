@@ -262,6 +262,42 @@ func TestServerUpdateBuildingEnergy(t *testing.T) {
 	}
 }
 
+func TestServerMaintainEnergyPost(t *testing.T) {
+	srv, mockSvc := newTestServer()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/game/scene/agents/ares-01/behaviors/maintain-energy", nil)
+	resp := httptest.NewRecorder()
+	srv.engine.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 OK, got %d", resp.Code)
+	}
+
+	mockSvc.mu.Lock()
+	defer mockSvc.mu.Unlock()
+	if mockSvc.maintainCalls == 0 {
+		t.Fatalf("expected MaintainEnergyNonNegative to be called")
+	}
+}
+
+func TestServerMaintainEnergyGetMethodNotAllowed(t *testing.T) {
+	srv, mockSvc := newTestServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/game/scene/agents/ares-01/behaviors/maintain-energy", nil)
+	resp := httptest.NewRecorder()
+	srv.engine.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected HTTP 405, got %d", resp.Code)
+	}
+
+	mockSvc.mu.Lock()
+	defer mockSvc.mu.Unlock()
+	if mockSvc.maintainCalls != 0 {
+		t.Fatalf("expected MaintainEnergyNonNegative not to be called")
+	}
+}
+
 func TestServerDeleteSceneBuilding(t *testing.T) {
 	srv, mockSvc := newTestServer()
 
