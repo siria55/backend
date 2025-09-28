@@ -26,3 +26,22 @@ func TestNewUsesSceneLoader(t *testing.T) {
 		t.Fatalf("unexpected scene id: %s", svc.Scene().ID)
 	}
 }
+
+func TestEnsureBuildingPlacementDetectsOverlap(t *testing.T) {
+	svc := &Service{
+		scene: Scene{
+			Buildings: []SceneBuilding{
+				{ID: "b1", Rect: []int{0, 0, 4, 4}},
+				{ID: "b2", Rect: []int{10, 10, 3, 3}},
+			},
+		},
+	}
+
+	if err := svc.ensureBuildingPlacement("b3", [4]int{2, 2, 4, 4}); err == nil {
+		t.Fatalf("expected overlap to be detected")
+	}
+
+	if err := svc.ensureBuildingPlacement("b1", [4]int{5, 5, 2, 2}); err != nil {
+		t.Fatalf("expected non-overlapping placement to pass, got %v", err)
+	}
+}

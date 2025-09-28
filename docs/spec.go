@@ -653,8 +653,22 @@ const specJSON = `{
         },
         "netFlowBefore": {"type": "number"},
         "netFlowAfter": {"type": "number"},
-        "towersBuilt": {"type": "integer"}
+        "towersBuilt": {"type": "integer"},
+        "relocation": {"$ref": "#/definitions/game.AgentRelocation"}
       }
+    },
+    "game.AgentRelocation": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "string"},
+        "position": {
+          "type": "array",
+          "items": {"type": "number"},
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "required": ["id", "position"]
     },
     "server.SystemSceneUpdateRequest": {
       "type": "object",

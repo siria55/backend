@@ -225,6 +225,11 @@ func (s *Service) UpdateSceneBuilding(ctx context.Context, in UpdateSceneBuildin
 		return Snapshot{}, fmt.Errorf("%w: width/height must be positive", ErrInvalidSceneEntity)
 	}
 
+	id := strings.TrimSpace(in.ID)
+	if err := s.ensureBuildingPlacement(id, in.Rect); err != nil {
+		return Snapshot{}, err
+	}
+
 	templateID := nullTrimmedString(in.TemplateID)
 	energyType, capacity, current, output, rate := extractTemplateEnergy(in.Energy)
 	if energyType.Valid {
@@ -259,6 +264,23 @@ func (s *Service) UpdateSceneBuilding(ctx context.Context, in UpdateSceneBuildin
 	}
 
 	return s.Snapshot(), nil
+}
+
+func (s *Service) ensureBuildingPlacement(buildingID string, rect [4]int) error {
+	x, y, w, h := rect[0], rect[1], rect[2], rect[3]
+	for _, existing := range s.scene.Buildings {
+		if existing.ID == buildingID {
+			continue
+		}
+		if len(existing.Rect) != 4 {
+			continue
+		}
+		eRect := existing.Rect
+		if rectanglesOverlap(x, y, w, h, eRect[0], eRect[1], eRect[2], eRect[3]) {
+			return fmt.Errorf("%w: building %s overlaps target area", ErrInvalidSceneEntity, existing.ID)
+		}
+	}
+	return nil
 }
 
 // DeleteSceneBuilding 删除场景中的建筑实例。
@@ -535,15 +557,37 @@ func (s *Service) MaintainEnergyNonNegative(ctx context.Context, agentID string)
 		return MaintainEnergyResult{}, fmt.Errorf("%w: agent id required", ErrInvalidSceneEntity)
 	}
 
+	var targetAgent SceneAgent
+	var found bool
+	for _, agent := range s.scene.Agents {
+		if agent.ID == agentID {
+			targetAgent = agent
+			found = true
+			break
+		}
+	}
+	if !found {
+		return MaintainEnergyResult{}, fmt.Errorf("%w: agent %s not found", ErrInvalidSceneEntity, agentID)
+	}
+
 	if s.maintainer == nil {
 		s.maintainer = newEnergyMaintainer(s.db, sceneLoader)
 	}
 
-	result, updatedScene, err := s.maintainer.Maintain(ctx, s.scene)
+	result, updatedScene, relocation, err := s.maintainer.Maintain(ctx, s.scene, targetAgent)
 	if err != nil {
 		return MaintainEnergyResult{}, err
 	}
 
-	s.scene = updatedScene
+	if relocation != nil {
+		if _, err := s.UpdateAgentRuntimePosition(ctx, relocation.ID, relocation.Position[0], relocation.Position[1]); err != nil {
+			return MaintainEnergyResult{}, err
+		}
+		result.Scene = s.scene
+		result.Relocation = relocation
+	} else {
+		s.scene = updatedScene
+	}
+
 	return result, nil
 }

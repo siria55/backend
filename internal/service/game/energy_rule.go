@@ -17,11 +17,12 @@ type energyBalance struct {
 
 // MaintainEnergyResult 描述“保持电量不减少”指令的执行结果。
 type MaintainEnergyResult struct {
-	Scene         Scene
-	Created       []SceneBuilding
-	NetFlowBefore float64
-	NetFlowAfter  float64
-	TowersBuilt   int
+	Scene         Scene            `json:"scene"`
+	Created       []SceneBuilding  `json:"created"`
+	NetFlowBefore float64          `json:"netFlowBefore"`
+	NetFlowAfter  float64          `json:"netFlowAfter"`
+	TowersBuilt   int              `json:"towersBuilt"`
+	Relocation    *AgentRelocation `json:"relocation,omitempty"`
 }
 
 // EnergyMaintainer 负责实现能量守恒相关规则。
@@ -37,7 +38,12 @@ func newEnergyMaintainer(db *sql.DB, loader func(*sql.DB, string) (Scene, error)
 	return &EnergyMaintainer{db: db, loadScene: loader}
 }
 
-func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene) (MaintainEnergyResult, Scene, error) {
+type AgentRelocation struct {
+	ID       string     `json:"id"`
+	Position [2]float64 `json:"position"`
+}
+
+func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent SceneAgent) (MaintainEnergyResult, Scene, *AgentRelocation, error) {
 	balance := computeEnergyBalance(scene)
 	netFlow := balance.output - balance.consumption
 
@@ -48,23 +54,23 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene) (MaintainE
 	}
 
 	if netFlow >= 0 {
-		return result, scene, nil
+		return result, scene, nil, nil
 	}
 
 	template, ok := findSolarTemplate(scene)
 	if !ok || template.Energy == nil || template.Energy.Output <= 0 {
-		return MaintainEnergyResult{}, Scene{}, ErrSolarTemplateMissing
+		return MaintainEnergyResult{}, Scene{}, nil, ErrSolarTemplateMissing
 	}
 
 	towerOutput := float64(template.Energy.Output)
 	deficit := balance.consumption - balance.output
 	if deficit <= 0 {
-		return result, scene, nil
+		return result, scene, nil, nil
 	}
 
 	towersNeeded := int(math.Ceil(deficit / towerOutput))
 	if towersNeeded <= 0 {
-		return result, scene, nil
+		return result, scene, nil, nil
 	}
 
 	width, height := determineSolarTowerFootprint(scene.Buildings)
@@ -72,11 +78,22 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene) (MaintainE
 	nextIndex := nextSolarTowerIndex(occupied)
 	planned := make([]plannedTower, 0, towersNeeded)
 
+	agentTile := clampTile(agent.Position, scene.Dimensions)
+	currentTile := agentTile
+	var relocation *AgentRelocation
+
 	for len(planned) < towersNeeded {
-		x, y, ok := findAvailablePlacement(occupied, scene.Dimensions, width, height)
+		x, y, ok := findAdjacentPlacementForAgent(currentTile, width, height, occupied, scene.Dimensions)
 		if !ok {
-			return MaintainEnergyResult{}, Scene{}, ErrNoAvailablePlacement
+			tile, placement, found := findRelocationAndPlacement(currentTile, width, height, occupied, scene.Dimensions)
+			if !found {
+				return MaintainEnergyResult{}, Scene{}, relocation, ErrNoAvailablePlacement
+			}
+			currentTile = tile
+			x, y = placement[0], placement[1]
+			relocation = &AgentRelocation{ID: agent.ID, Position: [2]float64{float64(tile[0]), float64(tile[1])}}
 		}
+
 		nextIndex++
 		id := fmt.Sprintf("solar_tower_auto_%02d", nextIndex)
 		label := fmt.Sprintf("太阳能塔 自动 %02d", nextIndex)
@@ -93,7 +110,7 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene) (MaintainE
 
 	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
-		return MaintainEnergyResult{}, Scene{}, err
+		return MaintainEnergyResult{}, Scene{}, relocation, err
 	}
 	defer func() {
 		if err != nil {
@@ -103,28 +120,28 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene) (MaintainE
 
 	for _, tower := range planned {
 		if _, err = tx.ExecContext(ctx, `
-            INSERT INTO system_scene_buildings (id, scene_id, template_id, label, position_x, position_y, size_width, size_height)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            ON CONFLICT (id)
-            DO UPDATE SET scene_id = EXCLUDED.scene_id,
-                          template_id = EXCLUDED.template_id,
-                          label = EXCLUDED.label,
-                          position_x = EXCLUDED.position_x,
-                          position_y = EXCLUDED.position_y,
-                          size_width = EXCLUDED.size_width,
-                          size_height = EXCLUDED.size_height
-        `, tower.id, scene.ID, solarTowerTemplateID, tower.label, tower.x, tower.y, tower.width, tower.height); err != nil {
-			return MaintainEnergyResult{}, Scene{}, err
+			INSERT INTO system_scene_buildings (id, scene_id, template_id, label, position_x, position_y, size_width, size_height)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (id)
+			DO UPDATE SET scene_id = EXCLUDED.scene_id,
+			              template_id = EXCLUDED.template_id,
+			              label = EXCLUDED.label,
+			              position_x = EXCLUDED.position_x,
+			              position_y = EXCLUDED.position_y,
+			              size_width = EXCLUDED.size_width,
+			              size_height = EXCLUDED.size_height
+		`, tower.id, scene.ID, solarTowerTemplateID, tower.label, tower.x, tower.y, tower.width, tower.height); err != nil {
+			return MaintainEnergyResult{}, Scene{}, relocation, err
 		}
 	}
 
 	if err = tx.Commit(); err != nil {
-		return MaintainEnergyResult{}, Scene{}, err
+		return MaintainEnergyResult{}, Scene{}, relocation, err
 	}
 
 	updatedScene, err := m.loadScene(m.db, scene.ID)
 	if err != nil {
-		return MaintainEnergyResult{}, Scene{}, err
+		return MaintainEnergyResult{}, Scene{}, relocation, err
 	}
 
 	created := collectCreatedBuildings(updatedScene.Buildings, planned)
@@ -133,8 +150,9 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene) (MaintainE
 	result.Created = created
 	result.NetFlowAfter = balanceAfter.output - balanceAfter.consumption
 	result.TowersBuilt = len(created)
+	result.Relocation = relocation
 
-	return result, updatedScene, nil
+	return result, updatedScene, relocation, nil
 }
 
 func findSolarTemplate(scene Scene) (*BuildingTemplate, bool) {
@@ -225,23 +243,129 @@ func nextSolarTowerIndex(buildings []SceneBuilding) int {
 	return maxIndex
 }
 
-func findAvailablePlacement(buildings []SceneBuilding, dims SceneDims, width, height int) (int, int, bool) {
-	if width <= 0 || height <= 0 {
-		return 0, 0, false
+func clampTile(position []float64, dims SceneDims) [2]int {
+	var rawX, rawY float64
+	if len(position) >= 1 {
+		rawX = position[0]
 	}
-	maxX := dims.Width - width
-	maxY := dims.Height - height
-	if maxX < 0 || maxY < 0 {
-		return 0, 0, false
+	if len(position) >= 2 {
+		rawY = position[1]
 	}
-	for y := 0; y <= maxY; y++ {
-		for x := 0; x <= maxX; x++ {
-			if areaIsFree(buildings, x, y, width, height) {
-				return x, y, true
-			}
+	x := int(math.Floor(rawX))
+	y := int(math.Floor(rawY))
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+	if dims.Width > 0 && x >= dims.Width {
+		x = dims.Width - 1
+	}
+	if dims.Height > 0 && y >= dims.Height {
+		y = dims.Height - 1
+	}
+	return [2]int{x, y}
+}
+
+func findAdjacentPlacementForAgent(agentTile [2]int, width, height int, occupied []SceneBuilding, dims SceneDims) (int, int, bool) {
+	candidates := [][2]int{
+		{agentTile[0] - width, agentTile[1]},  // left
+		{agentTile[0] + 1, agentTile[1]},      // right
+		{agentTile[0], agentTile[1] - height}, // top
+		{agentTile[0], agentTile[1] + 1},      // bottom
+	}
+
+	for _, candidate := range candidates {
+		x, y := candidate[0], candidate[1]
+		if x < 0 || y < 0 {
+			continue
+		}
+		if dims.Width > 0 && x+width > dims.Width {
+			continue
+		}
+		if dims.Height > 0 && y+height > dims.Height {
+			continue
+		}
+		if areaIsFree(occupied, x, y, width, height) {
+			return x, y, true
 		}
 	}
+
 	return 0, 0, false
+}
+
+type point struct {
+	x int
+	y int
+}
+
+func findRelocationAndPlacement(start [2]int, width, height int, occupied []SceneBuilding, dims SceneDims) ([2]int, [2]int, bool) {
+	if dims.Width <= 0 || dims.Height <= 0 {
+		return [2]int{}, [2]int{}, false
+	}
+
+	visited := make([][]bool, dims.Width)
+	for i := range visited {
+		visited[i] = make([]bool, dims.Height)
+	}
+
+	queue := make([]point, 0, dims.Width*dims.Height)
+	head := 0
+	queue = append(queue, point{start[0], start[1]})
+	if start[0] >= 0 && start[0] < dims.Width && start[1] >= 0 && start[1] < dims.Height {
+		visited[start[0]][start[1]] = true
+	}
+
+	for head < len(queue) {
+		cur := queue[head]
+		head++
+
+		if cur.x < 0 || cur.x >= dims.Width || cur.y < 0 || cur.y >= dims.Height {
+			continue
+		}
+
+		if !tileIsBlocked(cur.x, cur.y, occupied) {
+			if px, py, ok := findAdjacentPlacementForAgent([2]int{cur.x, cur.y}, width, height, occupied, dims); ok {
+				return [2]int{cur.x, cur.y}, [2]int{px, py}, true
+			}
+		}
+
+		for _, nb := range neighbors4(cur) {
+			if nb.x < 0 || nb.x >= dims.Width || nb.y < 0 || nb.y >= dims.Height {
+				continue
+			}
+			if visited[nb.x][nb.y] {
+				continue
+			}
+			visited[nb.x][nb.y] = true
+			queue = append(queue, nb)
+		}
+	}
+
+	return [2]int{}, [2]int{}, false
+}
+
+func tileIsBlocked(x, y int, buildings []SceneBuilding) bool {
+	for _, building := range buildings {
+		if len(building.Rect) != 4 {
+			continue
+		}
+		bx, by, bw, bh := building.Rect[0], building.Rect[1], building.Rect[2], building.Rect[3]
+		if x >= bx && x < bx+bw && y >= by && y < by+bh {
+			return true
+		}
+	}
+	return false
+}
+
+func neighbors4(p point) []point {
+	return []point{
+		{p.x - 1, p.y},
+		{p.x + 1, p.y},
+		{p.x, p.y - 1},
+		{p.x, p.y + 1},
+	}
 }
 
 func areaIsFree(buildings []SceneBuilding, x, y, width, height int) bool {

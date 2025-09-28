@@ -237,6 +237,7 @@ func (s *Server) maintainEnergyBalance(c *gin.Context) {
 		NetFlowBefore: result.NetFlowBefore,
 		NetFlowAfter:  result.NetFlowAfter,
 		TowersBuilt:   result.TowersBuilt,
+		Relocation:    result.Relocation,
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -593,11 +594,12 @@ type AgentPositionUpdateRequest struct {
 }
 
 type MaintainEnergyResponse struct {
-	Scene         game.Scene           `json:"scene"`
-	Created       []game.SceneBuilding `json:"created"`
-	NetFlowBefore float64              `json:"netFlowBefore"`
-	NetFlowAfter  float64              `json:"netFlowAfter"`
-	TowersBuilt   int                  `json:"towersBuilt"`
+	Scene         game.Scene            `json:"scene"`
+	Created       []game.SceneBuilding  `json:"created"`
+	NetFlowBefore float64               `json:"netFlowBefore"`
+	NetFlowAfter  float64               `json:"netFlowAfter"`
+	TowersBuilt   int                   `json:"towersBuilt"`
+	Relocation    *game.AgentRelocation `json:"relocation,omitempty"`
 }
 
 const swaggerUIHTML = `<!DOCTYPE html>
