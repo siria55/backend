@@ -20,13 +20,13 @@ import (
 type Server struct {
 	cfg         config.Config
 	engine      *gin.Engine
-	gameSvc     *game.Service
+	gameSvc     GameService
 	actionSvc   *actionservice.Service
 	sceneStream *sceneStream
 }
 
 // New 根据配置与服务依赖构造一个新的 HTTP Server。
-func New(cfg config.Config, gameSvc *game.Service, actionSvc *actionservice.Service) *Server {
+func New(cfg config.Config, gameSvc GameService, actionSvc *actionservice.Service) *Server {
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}

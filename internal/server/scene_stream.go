@@ -14,7 +14,7 @@ import (
 )
 
 type sceneStream struct {
-	service     *game.Service
+	service     GameService
 	interval    time.Duration
 	seconds     float64
 	drainFactor float64
@@ -34,7 +34,7 @@ type sceneStreamClient struct {
 	once   sync.Once
 }
 
-func newSceneStream(svc *game.Service, interval time.Duration, seconds, drainFactor float64) *sceneStream {
+func newSceneStream(svc GameService, interval time.Duration, seconds, drainFactor float64) *sceneStream {
 	if interval <= 0 {
 		interval = time.Second
 	}
