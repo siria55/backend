@@ -23,6 +23,18 @@ const specJSON = `{
         }
       }
     },
+    "/game/scene/stream": {
+      "get": {
+        "tags": ["Game"],
+        "summary": "订阅火星场景 WebSocket 流",
+        "produces": ["application/json"],
+        "responses": {
+          "101": {
+            "description": "WebSocket Upgrade"
+          }
+        }
+      }
+    },
     "/game/scene/buildings/{buildingID}/energy": {
       "post": {
         "tags": ["Game"],

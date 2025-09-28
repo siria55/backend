@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"eeo/backend/docs"
 	"eeo/backend/internal/config"
@@ -17,10 +18,11 @@ import (
 
 // Server 封装 HTTP 引导与路由注册逻辑。
 type Server struct {
-	cfg       config.Config
-	engine    *gin.Engine
-	gameSvc   *game.Service
-	actionSvc *actionservice.Service
+	cfg         config.Config
+	engine      *gin.Engine
+	gameSvc     *game.Service
+	actionSvc   *actionservice.Service
+	sceneStream *sceneStream
 }
 
 // New 根据配置与服务依赖构造一个新的 HTTP Server。
@@ -30,10 +32,11 @@ func New(cfg config.Config, gameSvc *game.Service, actionSvc *actionservice.Serv
 	}
 
 	srv := &Server{
-		cfg:       cfg,
-		engine:    gin.New(),
-		gameSvc:   gameSvc,
-		actionSvc: actionSvc,
+		cfg:         cfg,
+		engine:      gin.New(),
+		gameSvc:     gameSvc,
+		actionSvc:   actionSvc,
+		sceneStream: newSceneStream(gameSvc, time.Second, 1, game.DefaultDrainFactor),
 	}
 
 	srv.engine.Use(gin.Logger(), gin.Recovery())
@@ -68,6 +71,7 @@ func (s *Server) registerRoutes() {
 		gameRoutes := v1.Group("/game")
 		{
 			gameRoutes.GET("/scene", s.getGameScene)
+			gameRoutes.GET("/scene/stream", s.streamGameScene)
 			gameRoutes.POST("/scene/buildings/:buildingID/energy", s.updateGameBuildingEnergy)
 			gameRoutes.POST("/scene/energy/tick", s.advanceGameEnergy)
 		}
@@ -103,6 +107,14 @@ func (s *Server) healthz(c *gin.Context) {
 // getGameScene 获取当前火星场景配置。
 func (s *Server) getGameScene(c *gin.Context) {
 	c.JSON(http.StatusOK, s.gameSvc.Scene())
+}
+
+func (s *Server) streamGameScene(c *gin.Context) {
+	if s.sceneStream == nil {
+		c.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: "scene stream is not available"})
+		return
+	}
+	s.sceneStream.handle(c)
 }
 
 // getSystemScene 返回 system_* 场景快照。
