@@ -385,6 +385,17 @@ func (s *Service) UpdateAgentRuntimePosition(ctx context.Context, agentID string
 		return SceneAgent{}, err
 	}
 
+	roundedX := int(math.Round(posX))
+	roundedY := int(math.Round(posY))
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE system_scene_agents
+		   SET position_x = $1,
+		       position_y = $2
+		 WHERE id = $3
+	`, roundedX, roundedY, agentID); err != nil {
+		return SceneAgent{}, err
+	}
+
 	if err := s.reloadScene(); err != nil {
 		return SceneAgent{}, err
 	}
