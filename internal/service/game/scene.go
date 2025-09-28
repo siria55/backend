@@ -52,12 +52,13 @@ type SceneBuilding struct {
 
 // SceneAgent 描述场景中的角色。
 type SceneAgent struct {
-	ID         string    `json:"id"`
-	TemplateID string    `json:"templateId,omitempty"`
-	Label      string    `json:"label"`
-	Position   []float64 `json:"position"`
-	Color      int       `json:"color,omitempty"`
-	Actions    []string  `json:"actions,omitempty"`
+	ID         string     `json:"id"`
+	TemplateID string     `json:"templateId,omitempty"`
+	Label      string     `json:"label"`
+	Position   []float64  `json:"position"`
+	Color      int        `json:"color,omitempty"`
+	Actions    []string   `json:"actions,omitempty"`
+	UpdatedAt  *time.Time `json:"updatedAt,omitempty"`
 }
 
 // Snapshot 表示 system_* 表的整合视图。
@@ -247,7 +248,8 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
                COALESCE(s.label, t.label) AS label,
                COALESCE(r.pos_x, s.position_x::double precision) AS pos_x,
                COALESCE(r.pos_y, s.position_y::double precision) AS pos_y,
-               COALESCE(s.color, t.color) AS color
+               COALESCE(s.color, t.color) AS color,
+               r.updated_at
           FROM system_scene_agents s
           LEFT JOIN system_template_agents t ON t.id = s.template_id
           LEFT JOIN agent_runtime_state r ON r.agent_id = s.id
@@ -267,9 +269,10 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 			templateID sql.NullString
 			x, y       float64
 			color      sql.NullInt64
+			updatedAt  sql.NullTime
 		)
 
-		if err := agentRows.Scan(&id, &templateID, &label, &x, &y, &color); err != nil {
+		if err := agentRows.Scan(&id, &templateID, &label, &x, &y, &color, &updatedAt); err != nil {
 			return Scene{}, err
 		}
 
@@ -283,6 +286,10 @@ func loadSceneFromStore(db *sql.DB, sceneID string) (Scene, error) {
 		}
 		if color.Valid {
 			agent.Color = int(color.Int64)
+		}
+		if updatedAt.Valid {
+			ts := updatedAt.Time
+			agent.UpdatedAt = &ts
 		}
 		scene.Agents = append(scene.Agents, agent)
 		agentMap[id] = &scene.Agents[len(scene.Agents)-1]

@@ -339,11 +339,11 @@ func (s *Service) UpdateAgentRuntimePosition(ctx context.Context, agentID string
 		return SceneAgent{}, err
 	}
 
-	for _, agent := range s.scene.Agents {
-		if agent.ID == agentID {
-			return agent, nil
-		}
-	}
+    for _, agent := range s.scene.Agents {
+        if agent.ID == agentID {
+            return agent, nil
+        }
+    }
 
 	return SceneAgent{}, fmt.Errorf("%w: agent %s not found", ErrInvalidSceneEntity, agentID)
 }

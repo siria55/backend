@@ -61,9 +61,16 @@ func newMockGameService() *mockGameService {
 			Capacity: 200,
 		},
 	}
+	agent := game.SceneAgent{
+		ID:       "ares-01",
+		Label:    "ARES",
+		Position: []float64{10, 10},
+	}
 
 	scene.Buildings = []game.SceneBuilding{building}
+	scene.Agents = []game.SceneAgent{agent}
 	snapshot.Buildings = scene.Buildings
+	snapshot.Agents = scene.Agents
 
 	return &mockGameService{
 		scene:          scene,
