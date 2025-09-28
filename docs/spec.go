@@ -263,6 +263,29 @@ const specJSON = `{
             "schema": {"$ref": "#/definitions/server.ErrorResponse"}
           }
         }
+      },
+      "delete": {
+        "tags": ["System"],
+        "summary": "删除场景建筑实例",
+        "produces": ["application/json"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "更新后的快照",
+            "schema": {"$ref": "#/definitions/game.Snapshot"}
+          },
+          "400": {
+            "description": "请求参数错误",
+            "schema": {"$ref": "#/definitions/server.ErrorResponse"}
+          }
+        }
       }
     },
     "/system/scene/agents/{id}": {

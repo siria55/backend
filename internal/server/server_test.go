@@ -26,7 +26,8 @@ type mockGameService struct {
 		seconds     float64
 		drainFactor float64
 	}
-	energyCalls int
+	energyCalls         int
+	deleteBuildingCalls int
 
 	maintainResult game.MaintainEnergyResult
 	maintainErr    error
@@ -114,6 +115,22 @@ func (m *mockGameService) UpdateSceneBuilding(_ context.Context, _ game.UpdateSc
 
 func (m *mockGameService) UpdateSceneAgent(_ context.Context, _ game.UpdateSceneAgentInput) (game.Snapshot, error) {
 	return m.Snapshot(), nil
+}
+
+func (m *mockGameService) DeleteSceneBuilding(_ context.Context, id string) (game.Snapshot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deleteBuildingCalls++
+
+	for idx, building := range m.scene.Buildings {
+		if building.ID == id {
+			m.scene.Buildings = append(m.scene.Buildings[:idx], m.scene.Buildings[idx+1:]...)
+			m.snapshot.Buildings = m.scene.Buildings
+			return m.snapshot, nil
+		}
+	}
+
+	return game.Snapshot{}, fmt.Errorf("building %s not found", id)
 }
 
 func (m *mockGameService) UpdateBuildingEnergyCurrent(_ context.Context, id string, current float64) (game.SceneBuilding, error) {
@@ -242,5 +259,26 @@ func TestServerUpdateBuildingEnergy(t *testing.T) {
 	}
 	if mockSvc.lastBuildingUpdate.current != 120 {
 		t.Fatalf("expected current=120, got %v", mockSvc.lastBuildingUpdate.current)
+	}
+}
+
+func TestServerDeleteSceneBuilding(t *testing.T) {
+	srv, mockSvc := newTestServer()
+
+	req := httptest.NewRequest(http.MethodDelete, "/v1/system/scene/buildings/"+mockSvc.buildingResult.ID, nil)
+	resp := httptest.NewRecorder()
+	srv.engine.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 OK, got %d", resp.Code)
+	}
+
+	mockSvc.mu.Lock()
+	defer mockSvc.mu.Unlock()
+	if mockSvc.deleteBuildingCalls == 0 {
+		t.Fatalf("expected DeleteSceneBuilding to be called")
+	}
+	if len(mockSvc.scene.Buildings) != 0 {
+		t.Fatalf("expected building to be removed, got %d", len(mockSvc.scene.Buildings))
 	}
 }

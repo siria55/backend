@@ -83,6 +83,7 @@ func (s *Server) registerRoutes() {
 			system.PUT("/templates/buildings/:id", s.updateSystemBuildingTemplate)
 			system.PUT("/templates/agents/:id", s.updateSystemAgentTemplate)
 			system.PUT("/scene/buildings/:id", s.updateSystemSceneBuilding)
+			system.DELETE("/scene/buildings/:id", s.deleteSystemSceneBuilding)
 			system.PUT("/scene/agents/:id", s.updateSystemSceneAgent)
 		}
 
@@ -341,6 +342,26 @@ func (s *Server) updateSystemSceneBuilding(c *gin.Context) {
 	}
 
 	snapshot, err := s.gameSvc.UpdateSceneBuilding(c.Request.Context(), input)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, game.ErrInvalidSceneEntity) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, snapshot)
+}
+
+func (s *Server) deleteSystemSceneBuilding(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "id is required"})
+		return
+	}
+
+	snapshot, err := s.gameSvc.DeleteSceneBuilding(c.Request.Context(), id)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, game.ErrInvalidSceneEntity) {

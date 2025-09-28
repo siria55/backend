@@ -261,6 +261,28 @@ func (s *Service) UpdateSceneBuilding(ctx context.Context, in UpdateSceneBuildin
 	return s.Snapshot(), nil
 }
 
+// DeleteSceneBuilding 删除场景中的建筑实例。
+func (s *Service) DeleteSceneBuilding(ctx context.Context, buildingID string) (Snapshot, error) {
+	buildingID = strings.TrimSpace(buildingID)
+	if buildingID == "" {
+		return Snapshot{}, fmt.Errorf("%w: building id required", ErrInvalidSceneEntity)
+	}
+
+	res, err := s.db.ExecContext(ctx, `DELETE FROM system_scene_buildings WHERE id = $1 AND scene_id = $2`, buildingID, s.scene.ID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if rows, errRows := res.RowsAffected(); errRows == nil && rows == 0 {
+		return Snapshot{}, fmt.Errorf("%w: building %s not found", ErrInvalidSceneEntity, buildingID)
+	}
+
+	if err := s.reloadScene(); err != nil {
+		return Snapshot{}, err
+	}
+
+	return s.Snapshot(), nil
+}
+
 // UpdateSceneAgent 更新或创建场景中的 Agent 实例以及动作列表。
 func (s *Service) UpdateSceneAgent(ctx context.Context, in UpdateSceneAgentInput) (Snapshot, error) {
 	if strings.TrimSpace(in.ID) == "" {
