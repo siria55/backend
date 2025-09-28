@@ -74,8 +74,10 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 	}
 
 	width, height := determineSolarTowerFootprint(scene.Buildings)
-	occupied := append([]SceneBuilding(nil), scene.Buildings...)
-	nextIndex := nextSolarTowerIndex(occupied)
+	baseOccupied := append([]SceneBuilding(nil), scene.Buildings...)
+	occupied := append([]SceneBuilding(nil), baseOccupied...)
+	baseIndex := nextSolarTowerIndex(baseOccupied)
+	nextIndex := baseIndex
 	planned := make([]plannedTower, 0, towersNeeded)
 
 	agentTile := clampTile(agent.Position, scene.Dimensions)
@@ -90,8 +92,17 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 				return MaintainEnergyResult{}, Scene{}, relocation, ErrNoAvailablePlacement
 			}
 			currentTile = tile
+			if relocation == nil || relocation.Position[0] != float64(tile[0]) || relocation.Position[1] != float64(tile[1]) {
+				relocation = &AgentRelocation{ID: agent.ID, Position: [2]float64{float64(tile[0]), float64(tile[1])}}
+			}
+			occupied = append([]SceneBuilding(nil), baseOccupied...)
+			planned = planned[:0]
+			nextIndex = baseIndex
 			x, y = placement[0], placement[1]
-			relocation = &AgentRelocation{ID: agent.ID, Position: [2]float64{float64(tile[0]), float64(tile[1])}}
+		}
+
+		if !areaIsFree(occupied, x, y, width, height) {
+			return MaintainEnergyResult{}, Scene{}, relocation, ErrNoAvailablePlacement
 		}
 
 		nextIndex++
