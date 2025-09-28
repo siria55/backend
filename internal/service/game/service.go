@@ -6,14 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 )
 
 // Service 负责提供游戏场景配置等业务能力。
 type Service struct {
-	db    *sql.DB
-	scene Scene
+	db         *sql.DB
+	scene      Scene
+	maintainer *EnergyMaintainer
 }
 
 const (
@@ -21,22 +21,13 @@ const (
 	solarTowerTemplateID = "solar_tower"
 )
 
-// MaintainEnergyResult 描述“保持电量不减少”指令的执行结果。
-type MaintainEnergyResult struct {
-	Scene         Scene
-	Created       []SceneBuilding
-	NetFlowBefore float64
-	NetFlowAfter  float64
-	TowersBuilt   int
-}
-
 // New 返回默认的 Game 服务实例，并加载初始场景配置。
 func New(db *sql.DB, sceneID string) (*Service, error) {
 	scene, err := sceneLoader(db, sceneID)
 	if err != nil {
 		return nil, err
 	}
-	return &Service{db: db, scene: scene}, nil
+	return &Service{db: db, scene: scene, maintainer: newEnergyMaintainer(db, sceneLoader)}, nil
 }
 
 // Scene 返回静态场景配置。
@@ -437,29 +428,6 @@ func (s *Service) UpdateBuildingEnergyCurrent(ctx context.Context, buildingID st
 	return SceneBuilding{}, fmt.Errorf("%w: building %s not found after update", ErrInvalidSceneEntity, buildingID)
 }
 
-type energyBalance struct {
-	consumption float64
-	output      float64
-	storage     []SceneBuilding
-}
-
-func computeEnergyBalance(scene Scene) energyBalance {
-	var balance energyBalance
-	for _, building := range scene.Buildings {
-		if building.Energy == nil {
-			continue
-		}
-		switch strings.ToLower(building.Energy.Type) {
-		case "consumer":
-			balance.consumption += float64(building.Energy.Rate)
-		case "storage":
-			balance.output += float64(building.Energy.Output)
-			balance.storage = append(balance.storage, building)
-		}
-	}
-	return balance
-}
-
 // AdvanceEnergyState 根据耗能计算更新储能节点的剩余能量。
 func (s *Service) AdvanceEnergyState(ctx context.Context, seconds float64, drainFactor float64) (Scene, error) {
 	if seconds <= 0 {
@@ -545,207 +513,15 @@ func (s *Service) MaintainEnergyNonNegative(ctx context.Context, agentID string)
 		return MaintainEnergyResult{}, fmt.Errorf("%w: agent id required", ErrInvalidSceneEntity)
 	}
 
-	balance := computeEnergyBalance(s.scene)
-	netFlowBefore := balance.output - balance.consumption
-	result := MaintainEnergyResult{
-		Scene:         s.scene,
-		NetFlowBefore: netFlowBefore,
-		NetFlowAfter:  netFlowBefore,
+	if s.maintainer == nil {
+		s.maintainer = newEnergyMaintainer(s.db, sceneLoader)
 	}
 
-	if netFlowBefore >= 0 {
-		return result, nil
-	}
-
-	template, ok := s.findSolarTowerTemplate()
-	if !ok || template.Energy == nil || template.Energy.Output <= 0 {
-		return MaintainEnergyResult{}, ErrSolarTemplateMissing
-	}
-
-	towerOutput := float64(template.Energy.Output)
-	if towerOutput <= 0 {
-		return MaintainEnergyResult{}, ErrSolarTemplateMissing
-	}
-
-	deficit := balance.consumption - balance.output
-	if deficit <= 0 {
-		return result, nil
-	}
-
-	towersNeeded := int(math.Ceil(deficit / towerOutput))
-	if towersNeeded <= 0 {
-		return result, nil
-	}
-
-	width, height := determineSolarTowerFootprint(s.scene.Buildings)
-	if width <= 0 {
-		width = 4
-	}
-	if height <= 0 {
-		height = 4
-	}
-
-	occupied := append([]SceneBuilding(nil), s.scene.Buildings...)
-	nextIndex := nextSolarTowerIndex(occupied)
-	planned := make([]plannedTower, 0, towersNeeded)
-
-	for len(planned) < towersNeeded {
-		x, y, ok := findAvailablePlacement(occupied, s.scene.Dimensions, width, height)
-		if !ok {
-			return MaintainEnergyResult{}, ErrNoAvailablePlacement
-		}
-		nextIndex++
-		id := fmt.Sprintf("solar_tower_auto_%02d", nextIndex)
-		label := fmt.Sprintf("太阳能塔 自动 %02d", nextIndex)
-		planned = append(planned, plannedTower{
-			id:     id,
-			label:  label,
-			x:      x,
-			y:      y,
-			width:  width,
-			height: height,
-		})
-		occupied = append(occupied, SceneBuilding{ID: id, TemplateID: solarTowerTemplateID, Rect: []int{x, y, width, height}})
-	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
+	result, updatedScene, err := s.maintainer.Maintain(ctx, s.scene)
 	if err != nil {
 		return MaintainEnergyResult{}, err
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
 
-	for _, tower := range planned {
-		if _, err = tx.ExecContext(ctx, `
-			INSERT INTO system_scene_buildings (id, scene_id, template_id, label, position_x, position_y, size_width, size_height)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-			ON CONFLICT (id)
-			DO UPDATE SET scene_id = EXCLUDED.scene_id,
-			              template_id = EXCLUDED.template_id,
-			              label = EXCLUDED.label,
-			              position_x = EXCLUDED.position_x,
-			              position_y = EXCLUDED.position_y,
-			              size_width = EXCLUDED.size_width,
-			              size_height = EXCLUDED.size_height
-		`, tower.id, s.scene.ID, solarTowerTemplateID, tower.label, tower.x, tower.y, tower.width, tower.height); err != nil {
-			return MaintainEnergyResult{}, err
-		}
-	}
-
-	if err = tx.Commit(); err != nil {
-		return MaintainEnergyResult{}, err
-	}
-
-	if err := s.reloadScene(); err != nil {
-		return MaintainEnergyResult{}, err
-	}
-
-	created := make([]SceneBuilding, 0, len(planned))
-	createdIDs := make(map[string]struct{}, len(planned))
-	for _, tower := range planned {
-		createdIDs[tower.id] = struct{}{}
-	}
-	for _, building := range s.scene.Buildings {
-		if _, ok := createdIDs[building.ID]; ok {
-			created = append(created, building)
-		}
-	}
-
-	balanceAfter := computeEnergyBalance(s.scene)
-	result.Scene = s.scene
-	result.Created = created
-	result.NetFlowAfter = balanceAfter.output - balanceAfter.consumption
-	result.TowersBuilt = len(created)
-
+	s.scene = updatedScene
 	return result, nil
-}
-
-func (s *Service) findSolarTowerTemplate() (*BuildingTemplate, bool) {
-	for i := range s.scene.BuildingTemplates {
-		if s.scene.BuildingTemplates[i].ID == solarTowerTemplateID {
-			return &s.scene.BuildingTemplates[i], true
-		}
-	}
-	return nil, false
-}
-
-type plannedTower struct {
-	id     string
-	label  string
-	x      int
-	y      int
-	width  int
-	height int
-}
-
-func determineSolarTowerFootprint(buildings []SceneBuilding) (int, int) {
-	for _, building := range buildings {
-		if building.TemplateID == solarTowerTemplateID || strings.HasPrefix(building.ID, "solar_tower") {
-			if len(building.Rect) == 4 {
-				return building.Rect[2], building.Rect[3]
-			}
-		}
-	}
-	return 4, 4
-}
-
-func nextSolarTowerIndex(buildings []SceneBuilding) int {
-	maxIndex := 0
-	for _, building := range buildings {
-		if !strings.HasPrefix(building.ID, "solar_tower") {
-			continue
-		}
-		parts := strings.Split(building.ID, "_")
-		if len(parts) == 0 {
-			continue
-		}
-		last := parts[len(parts)-1]
-		value, err := strconv.Atoi(strings.TrimLeft(last, "0"))
-		if err != nil {
-			value, err = strconv.Atoi(last)
-		}
-		if err == nil && value > maxIndex {
-			maxIndex = value
-		}
-	}
-	return maxIndex
-}
-
-func findAvailablePlacement(buildings []SceneBuilding, dims SceneDims, width, height int) (int, int, bool) {
-	if width <= 0 || height <= 0 {
-		return 0, 0, false
-	}
-	maxX := dims.Width - width
-	maxY := dims.Height - height
-	if maxX < 0 || maxY < 0 {
-		return 0, 0, false
-	}
-	for y := 0; y <= maxY; y++ {
-		for x := 0; x <= maxX; x++ {
-			if areaIsFree(buildings, x, y, width, height) {
-				return x, y, true
-			}
-		}
-	}
-	return 0, 0, false
-}
-
-func areaIsFree(buildings []SceneBuilding, x, y, width, height int) bool {
-	for _, building := range buildings {
-		if len(building.Rect) != 4 {
-			continue
-		}
-		bx, by, bw, bh := building.Rect[0], building.Rect[1], building.Rect[2], building.Rect[3]
-		if rectanglesOverlap(x, y, width, height, bx, by, bw, bh) {
-			return false
-		}
-	}
-	return true
-}
-
-func rectanglesOverlap(ax, ay, aw, ah, bx, by, bw, bh int) bool {
-	return ax < bx+bw && ax+aw > bx && ay < by+bh && ay+ah > by
 }
