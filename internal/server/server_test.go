@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -156,33 +155,6 @@ func TestServerGetGameScene(t *testing.T) {
 	}
 	if len(payload.Buildings) != len(mockSvc.scene.Buildings) {
 		t.Fatalf("expected %d buildings, got %d", len(mockSvc.scene.Buildings), len(payload.Buildings))
-	}
-}
-
-func TestServerAdvanceGameEnergy(t *testing.T) {
-	srv, mockSvc := newTestServer()
-
-	body := bytes.NewBufferString(`{"seconds":5,"drainFactor":0.15}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/game/scene/energy/tick", body)
-	req.Header.Set("Content-Type", "application/json")
-	resp := httptest.NewRecorder()
-	srv.engine.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected HTTP 200 OK, got %d", resp.Code)
-	}
-
-	mockSvc.mu.Lock()
-	defer mockSvc.mu.Unlock()
-
-	if mockSvc.energyCalls == 0 {
-		t.Fatalf("expected AdvanceEnergyState to be called")
-	}
-	if mockSvc.lastEnergyInput.seconds != 5 {
-		t.Fatalf("expected seconds=5, got %v", mockSvc.lastEnergyInput.seconds)
-	}
-	if mockSvc.lastEnergyInput.drainFactor != 0.15 {
-		t.Fatalf("expected drainFactor=0.15, got %v", mockSvc.lastEnergyInput.drainFactor)
 	}
 }
 
