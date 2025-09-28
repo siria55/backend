@@ -32,6 +32,7 @@ type sceneStreamClient struct {
 	conn   *websocket.Conn
 	send   chan string
 	once   sync.Once
+	done   chan struct{}
 }
 
 func newSceneStream(svc GameService, interval time.Duration, seconds, drainFactor float64) *sceneStream {
@@ -120,6 +121,7 @@ func (s *sceneStream) addClient(conn *websocket.Conn) {
 		stream: s,
 		conn:   conn,
 		send:   make(chan string, 8),
+		done:   make(chan struct{}),
 	}
 
 	s.mu.Lock()
@@ -132,6 +134,8 @@ func (s *sceneStream) addClient(conn *websocket.Conn) {
 
 	go client.writeLoop()
 	go client.readLoop()
+
+	client.wait()
 }
 
 func (s *sceneStream) initialPayload() []byte {
@@ -182,7 +186,12 @@ func (c *sceneStreamClient) enqueue(payload []byte) {
 func (c *sceneStreamClient) close() {
 	c.once.Do(func() {
 		c.stream.removeClient(c)
+		close(c.done)
 	})
+}
+
+func (c *sceneStreamClient) wait() {
+	<-c.done
 }
 
 func (s *sceneStream) removeClient(client *sceneStreamClient) {
