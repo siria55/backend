@@ -86,6 +86,7 @@ func newMockGameService() *mockGameService {
 		buildingResult: building,
 		tablePreviews: []game.TablePreview{
 			{
+				Schema:  "public",
 				Name:    "system_scene_buildings",
 				Columns: []string{"id", "label"},
 				Rows: []map[string]any{
@@ -238,14 +239,22 @@ func (m *mockGameService) PreviewDatabaseTables(_ context.Context, requested []s
 
 	requestedSet := make(map[string]struct{}, len(requested))
 	for _, name := range requested {
-		if trimmed := strings.TrimSpace(name); trimmed != "" {
-			requestedSet[trimmed] = struct{}{}
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
 		}
+		requestedSet[strings.ToLower(trimmed)] = struct{}{}
 	}
 
 	var filtered []game.TablePreview
 	for _, preview := range m.tablePreviews {
-		if _, ok := requestedSet[preview.Name]; ok {
+		fullKey := strings.ToLower(preview.Schema + "." + preview.Name)
+		nameKey := strings.ToLower(preview.Name)
+		if _, ok := requestedSet[fullKey]; ok {
+			filtered = append(filtered, preview)
+			continue
+		}
+		if _, ok := requestedSet[nameKey]; ok {
 			filtered = append(filtered, preview)
 		}
 	}
@@ -378,11 +387,13 @@ func TestServerPreviewDatabaseTables(t *testing.T) {
 	mockSvc.mu.Lock()
 	mockSvc.tablePreviews = []game.TablePreview{
 		{
+			Schema:  "public",
 			Name:    "system_scene_buildings",
 			Columns: []string{"id"},
 			Rows:    []map[string]any{{"id": "storage-1"}},
 		},
 		{
+			Schema:  "public",
 			Name:    "system_scene_agents",
 			Columns: []string{"id"},
 			Rows:    []map[string]any{{"id": "ares-01"}},

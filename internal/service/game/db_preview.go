@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -18,9 +17,15 @@ const (
 
 // TablePreview 表示数据库表的预览数据。
 type TablePreview struct {
+	Schema  string           `json:"schema"`
 	Name    string           `json:"name"`
 	Columns []string         `json:"columns"`
 	Rows    []map[string]any `json:"rows"`
+}
+
+type tableRef struct {
+	schema string
+	name   string
 }
 
 // PreviewDatabaseTables 返回数据库表的预览数据。
@@ -31,7 +36,7 @@ func (s *Service) PreviewDatabaseTables(ctx context.Context, requested []string,
 
 	limit = clampPreviewLimit(limit)
 
-	allTables, err := s.listPublicTables(ctx)
+	allTables, err := s.listUserTables(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -40,12 +45,21 @@ func (s *Service) PreviewDatabaseTables(ctx context.Context, requested []string,
 		return []TablePreview{}, nil
 	}
 
-	tableSet := make(map[string]struct{}, len(allTables))
-	for _, name := range allTables {
-		tableSet[name] = struct{}{}
+	tableMap := make(map[string]tableRef, len(allTables))
+	for _, tbl := range allTables {
+		key := strings.ToLower(tbl.schema + "." + tbl.name)
+		tableMap[key] = tbl
 	}
 
-	var tables []string
+	lookupByName := make(map[string]tableRef)
+	for _, tbl := range allTables {
+		key := strings.ToLower(tbl.name)
+		if _, exists := lookupByName[key]; !exists {
+			lookupByName[key] = tbl
+		}
+	}
+
+	var tables []tableRef
 	if len(requested) == 0 {
 		tables = allTables
 	} else {
@@ -55,12 +69,18 @@ func (s *Service) PreviewDatabaseTables(ctx context.Context, requested []string,
 			if trimmed == "" {
 				continue
 			}
-			if _, ok := seen[trimmed]; ok {
+			key := strings.ToLower(trimmed)
+			if _, ok := seen[key]; ok {
 				continue
 			}
-			if _, ok := tableSet[trimmed]; ok {
-				tables = append(tables, trimmed)
-				seen[trimmed] = struct{}{}
+			if tbl, ok := tableMap[key]; ok {
+				tables = append(tables, tbl)
+				seen[key] = struct{}{}
+				continue
+			}
+			if tbl, ok := lookupByName[key]; ok {
+				tables = append(tables, tbl)
+				seen[key] = struct{}{}
 			}
 		}
 		if len(tables) == 0 {
@@ -70,7 +90,7 @@ func (s *Service) PreviewDatabaseTables(ctx context.Context, requested []string,
 
 	previews := make([]TablePreview, 0, len(tables))
 	for _, table := range tables {
-		preview, err := s.previewTable(ctx, table, limit)
+		preview, err := s.previewTable(ctx, table.schema, table.name, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -80,37 +100,36 @@ func (s *Service) PreviewDatabaseTables(ctx context.Context, requested []string,
 	return previews, nil
 }
 
-func (s *Service) listPublicTables(ctx context.Context) ([]string, error) {
+func (s *Service) listUserTables(ctx context.Context) ([]tableRef, error) {
 	rows, err := s.db.QueryContext(ctx, `
-        SELECT table_name
-          FROM information_schema.tables
-         WHERE table_schema = 'public'
-           AND table_type = 'BASE TABLE'
-         ORDER BY table_name
+        SELECT schemaname, tablename
+          FROM pg_tables
+         WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+         ORDER BY schemaname, tablename
     `)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var tables []string
+	var tables []tableRef
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var schema, name string
+		if err := rows.Scan(&schema, &name); err != nil {
 			return nil, err
 		}
-		tables = append(tables, name)
+		tables = append(tables, tableRef{schema: schema, name: name})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	sort.Strings(tables)
 	return tables, nil
 }
 
-func (s *Service) previewTable(ctx context.Context, table string, limit int) (TablePreview, error) {
-	query := fmt.Sprintf("SELECT * FROM %s LIMIT %d", pq.QuoteIdentifier(table), limit)
+func (s *Service) previewTable(ctx context.Context, schema, table string, limit int) (TablePreview, error) {
+	query := fmt.Sprintf("SELECT * FROM %s.%s LIMIT %d",
+		pq.QuoteIdentifier(schema), pq.QuoteIdentifier(table), limit)
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return TablePreview{}, err
@@ -149,6 +168,7 @@ func (s *Service) previewTable(ctx context.Context, table string, limit int) (Ta
 	}
 
 	return TablePreview{
+		Schema:  schema,
 		Name:    table,
 		Columns: columns,
 		Rows:    data,
