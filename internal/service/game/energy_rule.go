@@ -86,6 +86,9 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 	agentTile := clampTile(agent.Position, scene.Dimensions)
 	currentTile := agentTile
 	var relocation *AgentRelocation
+	visitedTiles := map[[2]int]struct{}{
+		agentTile: struct{}{},
+	}
 
 	for len(planned) < towersNeeded {
 		x, y, ok := findAdjacentPlacementForAgent(currentTile, width, height, occupied, scene.Dimensions)
@@ -95,14 +98,16 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 				log.Printf("EnergyMaintainer: no placement available agent=%s built=%d/%d", agent.ID, len(planned), towersNeeded)
 				return MaintainEnergyResult{}, Scene{}, relocation, ErrNoAvailablePlacement
 			}
+			if _, seen := visitedTiles[tile]; seen {
+				log.Printf("EnergyMaintainer: relocation revisited agent=%s tile=(%d,%d)", agent.ID, tile[0], tile[1])
+				return MaintainEnergyResult{}, Scene{}, relocation, ErrNoAvailablePlacement
+			}
+			visitedTiles[tile] = struct{}{}
 			currentTile = tile
 			if relocation == nil || relocation.Position[0] != float64(tile[0]) || relocation.Position[1] != float64(tile[1]) {
 				relocation = &AgentRelocation{ID: agent.ID, Position: [2]float64{float64(tile[0]), float64(tile[1])}}
 				log.Printf("EnergyMaintainer: relocation agent=%s to (%d,%d)", agent.ID, tile[0], tile[1])
 			}
-			occupied = append([]SceneBuilding(nil), baseOccupied...)
-			planned = planned[:0]
-			nextIndex = baseIndex
 			x, y = placement[0], placement[1]
 		}
 
