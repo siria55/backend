@@ -21,5 +21,4 @@ type GameService interface {
 	AdvanceEnergyState(context.Context, float64, float64) (game.Scene, error)
 	UpdateAgentRuntimePosition(context.Context, string, float64, float64) (game.SceneAgent, error)
 	MaintainEnergyNonNegative(context.Context, string) (game.MaintainEnergyResult, error)
-	PreviewDatabaseTables(context.Context, []string, int) ([]game.TablePreview, error)
 }

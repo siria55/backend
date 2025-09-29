@@ -86,7 +86,6 @@ func (s *Server) registerRoutes() {
 			system.PUT("/scene/buildings/:id", s.updateSystemSceneBuilding)
 			system.DELETE("/scene/buildings/:id", s.deleteSystemSceneBuilding)
 			system.GET("/scene/buildings/preview", s.previewSceneBuildings)
-			system.GET("/db/preview", s.previewDatabaseTables)
 			system.PUT("/scene/agents/:id", s.updateSystemSceneAgent)
 		}
 
@@ -418,39 +417,6 @@ func (s *Server) previewSceneBuildings(c *gin.Context) {
 		"sceneId":   sceneID,
 		"count":     len(items),
 		"buildings": items,
-	})
-}
-
-func (s *Server) previewDatabaseTables(c *gin.Context) {
-	limit := 0
-	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil {
-			limit = parsed
-		} else {
-			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "limit must be a number"})
-			return
-		}
-	}
-
-	requested := c.QueryArray("table")
-	if len(requested) == 0 {
-		if raw := strings.TrimSpace(c.Query("tables")); raw != "" {
-			for _, part := range strings.Split(raw, ",") {
-				if trimmed := strings.TrimSpace(part); trimmed != "" {
-					requested = append(requested, trimmed)
-				}
-			}
-		}
-	}
-
-	previews, err := s.gameSvc.PreviewDatabaseTables(c.Request.Context(), requested, limit)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"tables": previews,
 	})
 }
 

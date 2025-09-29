@@ -47,7 +47,6 @@ type mockGameService struct {
 	}
 	runtimeUpdateCalls int
 
-	tablePreviews []game.TablePreview
 }
 
 func newMockGameService() *mockGameService {
@@ -84,16 +83,6 @@ func newMockGameService() *mockGameService {
 		scene:          scene,
 		snapshot:       snapshot,
 		buildingResult: building,
-		tablePreviews: []game.TablePreview{
-			{
-				Schema:  "public",
-				Name:    "system_scene_buildings",
-				Columns: []string{"id", "label"},
-				Rows: []map[string]any{
-					{"id": building.ID, "label": building.Label},
-				},
-			},
-		},
 	}
 }
 
@@ -225,43 +214,6 @@ func (m *mockGameService) MaintainEnergyNonNegative(_ context.Context, agentID s
 	return m.maintainResult, nil
 }
 
-func (m *mockGameService) PreviewDatabaseTables(_ context.Context, requested []string, limit int) ([]game.TablePreview, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if len(m.tablePreviews) == 0 {
-		return []game.TablePreview{}, nil
-	}
-
-	if len(requested) == 0 {
-		return m.tablePreviews, nil
-	}
-
-	requestedSet := make(map[string]struct{}, len(requested))
-	for _, name := range requested {
-		trimmed := strings.TrimSpace(name)
-		if trimmed == "" {
-			continue
-		}
-		requestedSet[strings.ToLower(trimmed)] = struct{}{}
-	}
-
-	var filtered []game.TablePreview
-	for _, preview := range m.tablePreviews {
-		fullKey := strings.ToLower(preview.Schema + "." + preview.Name)
-		nameKey := strings.ToLower(preview.Name)
-		if _, ok := requestedSet[fullKey]; ok {
-			filtered = append(filtered, preview)
-			continue
-		}
-		if _, ok := requestedSet[nameKey]; ok {
-			filtered = append(filtered, preview)
-		}
-	}
-
-	return filtered, nil
-}
-
 func newTestServer() (*Server, *mockGameService) {
 	gin.SetMode(gin.TestMode)
 
@@ -379,44 +331,5 @@ func TestServerDeleteSceneBuilding(t *testing.T) {
 	}
 	if len(mockSvc.scene.Buildings) != 0 {
 		t.Fatalf("expected building to be removed, got %d", len(mockSvc.scene.Buildings))
-	}
-}
-
-func TestServerPreviewDatabaseTables(t *testing.T) {
-	srv, mockSvc := newTestServer()
-	mockSvc.mu.Lock()
-	mockSvc.tablePreviews = []game.TablePreview{
-		{
-			Schema:  "public",
-			Name:    "system_scene_buildings",
-			Columns: []string{"id"},
-			Rows:    []map[string]any{{"id": "storage-1"}},
-		},
-		{
-			Schema:  "public",
-			Name:    "system_scene_agents",
-			Columns: []string{"id"},
-			Rows:    []map[string]any{{"id": "ares-01"}},
-		},
-	}
-	mockSvc.mu.Unlock()
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/system/db/preview", nil)
-	resp := httptest.NewRecorder()
-	srv.engine.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected HTTP 200 OK, got %d", resp.Code)
-	}
-
-	var payload struct {
-		Tables []game.TablePreview `json:"tables"`
-	}
-	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if len(payload.Tables) != len(mockSvc.tablePreviews) {
-		t.Fatalf("expected %d tables, got %d", len(mockSvc.tablePreviews), len(payload.Tables))
 	}
 }

@@ -288,6 +288,50 @@ const specJSON = `{
         }
       }
     },
+    "/system/scene/buildings/preview": {
+      "get": {
+        "tags": ["System"],
+        "summary": "预览场景建筑列表",
+        "produces": ["application/json"],
+        "parameters": [
+          {
+            "name": "sceneId",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "description": "可选的场景 ID，缺省为当前运行中的场景"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32",
+            "description": "限制返回的建筑数量"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "预览数据",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "sceneId": {"type": "string"},
+                "count": {"type": "integer", "format": "int32"},
+                "buildings": {
+                  "type": "array",
+                  "items": {"$ref": "#/definitions/game.SceneBuilding"}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数错误",
+            "schema": {"$ref": "#/definitions/server.ErrorResponse"}
+          }
+        }
+      }
+    },
     "/system/scene/agents/{id}": {
       "put": {
         "tags": ["System"],
