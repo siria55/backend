@@ -9,7 +9,7 @@ if ! command -v migrate >/dev/null 2>&1; then
   exit 1
 fi
 
-export DATABASE_URL=${DATABASE_URL:-postgres://postgres:z13547842355@localhost:5432/mars?sslmode=disable}
+export DATABASE_URL=${DATABASE_URL:-postgres://postgres:w1XEPKbf24egWv8bgdJP@localhost:5432/mars?sslmode=disable}
 
 CMD=${1:-up}
 shift || true

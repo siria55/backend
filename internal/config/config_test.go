@@ -16,7 +16,7 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.HTTP.Host != "0.0.0.0" || cfg.HTTP.Port != "8080" {
 		t.Fatalf("expected default HTTP host:port 0.0.0.0:8080, got %s:%s", cfg.HTTP.Host, cfg.HTTP.Port)
 	}
-	expectedURL := "postgres://postgres:z13547842355@localhost:5432/mars?sslmode=disable"
+	expectedURL := "postgres://postgres:w1XEPKbf24egWv8bgdJP@localhost:5432/mars?sslmode=disable"
 	if cfg.Database.URL != expectedURL {
 		t.Fatalf("expected default database url %q, got %q", expectedURL, cfg.Database.URL)
 	}
