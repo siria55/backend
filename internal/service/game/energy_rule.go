@@ -40,8 +40,9 @@ func newEnergyMaintainer(db *sql.DB, loader func(*sql.DB, string) (Scene, error)
 }
 
 type AgentRelocation struct {
-	ID       string     `json:"id"`
-	Position [2]float64 `json:"position"`
+	ID       string       `json:"id"`
+	Position [2]float64   `json:"position"`
+	Path     [][2]float64 `json:"path,omitempty"`
 }
 
 func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent SceneAgent) (MaintainEnergyResult, Scene, *AgentRelocation, error) {
@@ -86,6 +87,7 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 	agentTile := clampTile(agent.Position, scene.Dimensions)
 	currentTile := agentTile
 	var relocation *AgentRelocation
+	var relocationPathTiles [][2]int
 	visitedTiles := map[[2]int]struct{}{
 		agentTile: struct{}{},
 	}
@@ -93,7 +95,7 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 	for len(planned) < towersNeeded {
 		x, y, ok := findAdjacentPlacementForAgent(currentTile, width, height, occupied, scene.Dimensions)
 		if !ok {
-			tile, placement, found := findRelocationAndPlacement(currentTile, width, height, occupied, scene.Dimensions)
+			tile, placement, pathTiles, found := findRelocationAndPlacement(currentTile, width, height, occupied, scene.Dimensions)
 			if !found {
 				log.Printf("EnergyMaintainer: no placement available agent=%s built=%d/%d", agent.ID, len(planned), towersNeeded)
 				return MaintainEnergyResult{}, Scene{}, relocation, ErrNoAvailablePlacement
@@ -104,6 +106,7 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 			}
 			visitedTiles[tile] = struct{}{}
 			currentTile = tile
+			relocationPathTiles = pathTiles
 			if relocation == nil || relocation.Position[0] != float64(tile[0]) || relocation.Position[1] != float64(tile[1]) {
 				relocation = &AgentRelocation{ID: agent.ID, Position: [2]float64{float64(tile[0]), float64(tile[1])}}
 				log.Printf("EnergyMaintainer: relocation agent=%s to (%d,%d)", agent.ID, tile[0], tile[1])
@@ -173,7 +176,16 @@ func (m *EnergyMaintainer) Maintain(ctx context.Context, scene Scene, agent Scen
 	result.Created = created
 	result.NetFlowAfter = balanceAfter.output - balanceAfter.consumption
 	result.TowersBuilt = len(created)
-	result.Relocation = relocation
+	if relocation != nil {
+		if len(relocationPathTiles) > 0 {
+			path := make([][2]float64, len(relocationPathTiles))
+			for i, tile := range relocationPathTiles {
+				path[i] = [2]float64{float64(tile[0]) + 0.5, float64(tile[1]) + 0.5}
+			}
+			relocation.Path = path
+		}
+		result.Relocation = relocation
+	}
 
 	log.Printf("EnergyMaintainer: success agent=%s towersBuilt=%d relocation=%v", agent.ID, len(planned), relocation != nil)
 
@@ -325,9 +337,9 @@ type point struct {
 	y int
 }
 
-func findRelocationAndPlacement(start [2]int, width, height int, occupied []SceneBuilding, dims SceneDims) ([2]int, [2]int, bool) {
+func findRelocationAndPlacement(start [2]int, width, height int, occupied []SceneBuilding, dims SceneDims) ([2]int, [2]int, [][2]int, bool) {
 	if dims.Width <= 0 || dims.Height <= 0 {
-		return [2]int{}, [2]int{}, false
+		return [2]int{}, [2]int{}, nil, false
 	}
 
 	visited := make([][]bool, dims.Width)
@@ -341,6 +353,8 @@ func findRelocationAndPlacement(start [2]int, width, height int, occupied []Scen
 	if start[0] >= 0 && start[0] < dims.Width && start[1] >= 0 && start[1] < dims.Height {
 		visited[start[0]][start[1]] = true
 	}
+	parents := make(map[point]point)
+	startPoint := point{start[0], start[1]}
 
 	for head < len(queue) {
 		cur := queue[head]
@@ -352,7 +366,8 @@ func findRelocationAndPlacement(start [2]int, width, height int, occupied []Scen
 
 		if !tileIsBlocked(cur.x, cur.y, occupied) {
 			if px, py, ok := findAdjacentPlacementForAgent([2]int{cur.x, cur.y}, width, height, occupied, dims); ok {
-				return [2]int{cur.x, cur.y}, [2]int{px, py}, true
+				pathTiles := reconstructPathTiles(parents, startPoint, cur)
+				return [2]int{cur.x, cur.y}, [2]int{px, py}, pathTiles, true
 			}
 		}
 
@@ -364,11 +379,36 @@ func findRelocationAndPlacement(start [2]int, width, height int, occupied []Scen
 				continue
 			}
 			visited[nb.x][nb.y] = true
+			parents[nb] = cur
 			queue = append(queue, nb)
 		}
 	}
 
-	return [2]int{}, [2]int{}, false
+	return [2]int{}, [2]int{}, nil, false
+}
+
+func reconstructPathTiles(parents map[point]point, start, end point) [][2]int {
+	if end == start {
+		return nil
+	}
+
+	path := make([][2]int, 0)
+	cur := end
+
+	for cur != start {
+		path = append(path, [2]int{cur.x, cur.y})
+		next, ok := parents[cur]
+		if !ok {
+			break
+		}
+		cur = next
+	}
+
+	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
+		path[i], path[j] = path[j], path[i]
+	}
+
+	return path
 }
 
 func tileIsBlocked(x, y int, buildings []SceneBuilding) bool {

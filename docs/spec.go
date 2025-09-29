@@ -710,6 +710,15 @@ const specJSON = `{
           "items": {"type": "number"},
           "minItems": 2,
           "maxItems": 2
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 2,
+            "maxItems": 2
+          }
         }
       },
       "required": ["id", "position"]
