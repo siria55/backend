@@ -306,6 +306,31 @@ func (s *Service) DeleteSceneBuilding(ctx context.Context, buildingID string) (S
 	return s.Snapshot(), nil
 }
 
+// ListSceneBuildings 返回指定场景的建筑列表，支持限制数量。
+func (s *Service) ListSceneBuildings(ctx context.Context, sceneID string, limit int) ([]SceneBuilding, error) {
+	sceneID = strings.TrimSpace(sceneID)
+	if sceneID == "" {
+		return nil, fmt.Errorf("%w: scene id required", ErrInvalidSceneConfig)
+	}
+
+	if sceneID != s.scene.ID {
+		newScene, err := sceneLoader(s.db, sceneID)
+		if err != nil {
+			return nil, err
+		}
+		s.scene = newScene
+	}
+
+	buildings := s.scene.Buildings
+	if limit > 0 && len(buildings) > limit {
+		buildings = buildings[:limit]
+	}
+
+	cloned := make([]SceneBuilding, len(buildings))
+	copy(cloned, buildings)
+	return cloned, nil
+}
+
 // UpdateSceneAgent 更新或创建场景中的 Agent 实例以及动作列表。
 func (s *Service) UpdateSceneAgent(ctx context.Context, in UpdateSceneAgentInput) (Snapshot, error) {
 	if strings.TrimSpace(in.ID) == "" {

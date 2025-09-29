@@ -1,13 +1,13 @@
 package server
 
 import (
-    "encoding/json"
-    "errors"
-    "log"
-    "net/http"
-    "strconv"
-    "strings"
-    "time"
+	"encoding/json"
+	"errors"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"eeo/backend/docs"
 	"eeo/backend/internal/config"
@@ -85,6 +85,8 @@ func (s *Server) registerRoutes() {
 			system.PUT("/templates/agents/:id", s.updateSystemAgentTemplate)
 			system.PUT("/scene/buildings/:id", s.updateSystemSceneBuilding)
 			system.DELETE("/scene/buildings/:id", s.deleteSystemSceneBuilding)
+			system.GET("/scene/buildings/preview", s.previewSceneBuildings)
+			system.GET("/db/preview", s.previewDatabaseTables)
 			system.PUT("/scene/agents/:id", s.updateSystemSceneAgent)
 		}
 
@@ -215,46 +217,46 @@ func (s *Server) handleMaintainEnergy(c *gin.Context) {
 }
 
 func (s *Server) maintainEnergyBalance(c *gin.Context) {
-    agentID := c.Param("agentID")
-    if strings.TrimSpace(agentID) == "" {
-        c.JSON(http.StatusBadRequest, ErrorResponse{Error: "agentID is required"})
-        return
-    }
-
-    log.Printf("maintainEnergyBalance: start agent=%s", agentID)
-
-    result, err := s.gameSvc.MaintainEnergyNonNegative(c.Request.Context(), agentID)
-    if err != nil {
-        log.Printf("maintainEnergyBalance: error agent=%s err=%v", agentID, err)
-        status := http.StatusInternalServerError
-        switch {
-        case errors.Is(err, game.ErrInvalidSceneEntity):
-            status = http.StatusBadRequest
-        case errors.Is(err, game.ErrSolarTemplateMissing):
-            status = http.StatusFailedDependency
-        case errors.Is(err, game.ErrNoAvailablePlacement):
-            status = http.StatusConflict
-        }
-        c.JSON(status, ErrorResponse{Error: err.Error()})
-        return
-    }
-
-    if s.sceneStream != nil {
-        s.sceneStream.broadcast(result.Scene)
+	agentID := c.Param("agentID")
+	if strings.TrimSpace(agentID) == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "agentID is required"})
+		return
 	}
 
-    response := MaintainEnergyResponse{
-        Scene:         result.Scene,
-        Created:       result.Created,
-        NetFlowBefore: result.NetFlowBefore,
-        NetFlowAfter:  result.NetFlowAfter,
-        TowersBuilt:   result.TowersBuilt,
-        Relocation:    result.Relocation,
-    }
+	log.Printf("maintainEnergyBalance: start agent=%s", agentID)
 
-    log.Printf("maintainEnergyBalance: success agent=%s towers=%d relocation=%v", agentID, result.TowersBuilt, result.Relocation != nil)
+	result, err := s.gameSvc.MaintainEnergyNonNegative(c.Request.Context(), agentID)
+	if err != nil {
+		log.Printf("maintainEnergyBalance: error agent=%s err=%v", agentID, err)
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, game.ErrInvalidSceneEntity):
+			status = http.StatusBadRequest
+		case errors.Is(err, game.ErrSolarTemplateMissing):
+			status = http.StatusFailedDependency
+		case errors.Is(err, game.ErrNoAvailablePlacement):
+			status = http.StatusConflict
+		}
+		c.JSON(status, ErrorResponse{Error: err.Error()})
+		return
+	}
 
-    c.JSON(http.StatusOK, response)
+	if s.sceneStream != nil {
+		s.sceneStream.broadcast(result.Scene)
+	}
+
+	response := MaintainEnergyResponse{
+		Scene:         result.Scene,
+		Created:       result.Created,
+		NetFlowBefore: result.NetFlowBefore,
+		NetFlowAfter:  result.NetFlowAfter,
+		TowersBuilt:   result.TowersBuilt,
+		Relocation:    result.Relocation,
+	}
+
+	log.Printf("maintainEnergyBalance: success agent=%s towers=%d relocation=%v", agentID, result.TowersBuilt, result.Relocation != nil)
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (s *Server) updateSystemBuildingTemplate(c *gin.Context) {
@@ -387,6 +389,69 @@ func (s *Server) deleteSystemSceneBuilding(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, snapshot)
+}
+
+func (s *Server) previewSceneBuildings(c *gin.Context) {
+	sceneID := strings.TrimSpace(c.Query("sceneId"))
+	if sceneID == "" {
+		sceneID = s.gameSvc.Scene().ID
+	}
+
+	limit := 0
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	items, err := s.gameSvc.ListSceneBuildings(c.Request.Context(), sceneID, limit)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, game.ErrInvalidSceneConfig) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"sceneId":   sceneID,
+		"count":     len(items),
+		"buildings": items,
+	})
+}
+
+func (s *Server) previewDatabaseTables(c *gin.Context) {
+	limit := 0
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		} else {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "limit must be a number"})
+			return
+		}
+	}
+
+	requested := c.QueryArray("table")
+	if len(requested) == 0 {
+		if raw := strings.TrimSpace(c.Query("tables")); raw != "" {
+			for _, part := range strings.Split(raw, ",") {
+				if trimmed := strings.TrimSpace(part); trimmed != "" {
+					requested = append(requested, trimmed)
+				}
+			}
+		}
+	}
+
+	previews, err := s.gameSvc.PreviewDatabaseTables(c.Request.Context(), requested, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"tables": previews,
+	})
 }
 
 func (s *Server) updateSystemSceneAgent(c *gin.Context) {
