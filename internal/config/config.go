@@ -28,7 +28,7 @@ func Load() Config {
 			Port: envOrDefault("HTTP_PORT", "8080"),
 		},
 		Database: DatabaseConfig{
-			URL: envOrDefault("DATABASE_URL", "postgres://postgres:z13547842355@localhost:5432/mars?sslmode=disable"),
+			URL: envOrDefault("DATABASE_URL", "postgres://postgres:w1XEPKbf24egWv8bgdJP@localhost:5432/mars?sslmode=disable"),
 		},
 	}
 }
